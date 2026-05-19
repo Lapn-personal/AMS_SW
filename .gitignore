@@ -20,3 +20,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Settings — игнорируем всё, кроме VERSION
+fw_settings/*
+!fw_settings/VERSION
