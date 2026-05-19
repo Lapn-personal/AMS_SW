@@ -8,7 +8,7 @@
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/fw_env"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
-VERSION_FILE="$PROJECT_DIR/VERSION"
+VERSION_FILE="$PROJECT_DIR/fw_settings/VERSION"
 
 # Читаем версию проекта
 if [ -f "$VERSION_FILE" ]; then

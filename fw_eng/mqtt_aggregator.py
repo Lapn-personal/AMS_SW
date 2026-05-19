@@ -10,7 +10,7 @@ import paho.mqtt.client as mqtt
 
 # ========== ВЕРСИЯ ПРОЕКТА ==========
 try:
-    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION")) as f:
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fw_settings", "VERSION")) as f:
         PROJECT_VERSION = f.read().strip()
 except:
     PROJECT_VERSION = "unknown"
