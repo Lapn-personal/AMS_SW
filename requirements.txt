@@ -1,0 +1,7 @@
+paho-mqtt>=1.6.1
+smbus2>=0.4.3
+adafruit-circuitpython-vl53l0x>=2.1.14
+adafruit-circuitpython-ads1x15>=2.2.22
+adafruit-circuitpython-tsl2561>=2.3.1
+adafruit-circuitpython-mpu6050>=1.1.10
+adafruit-circuitpython-ina219>=2.1.0
