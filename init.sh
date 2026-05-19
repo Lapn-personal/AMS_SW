@@ -8,7 +8,16 @@
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/fw_env"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
+VERSION_FILE="$PROJECT_DIR/VERSION"
 
+# Читаем версию проекта
+if [ -f "$VERSION_FILE" ]; then
+    PROJECT_VERSION=$(cat "$VERSION_FILE" | tr -d ' \n\r\t')
+else
+    PROJECT_VERSION="unknown"
+fi
+
+echo "[INIT] AMS_SW v$PROJECT_VERSION"
 echo "[INIT] Проект: $PROJECT_DIR"
 
 # 1. Создаём виртуальное окружение, если его нет

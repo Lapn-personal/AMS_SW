@@ -8,6 +8,13 @@ import os
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
+# ========== ВЕРСИЯ ПРОЕКТА ==========
+try:
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION")) as f:
+        PROJECT_VERSION = f.read().strip()
+except:
+    PROJECT_VERSION = "unknown"
+
 # ========== НАСТРОЙКИ ==========
 LOCAL_BROKER = "127.0.0.1"
 LOCAL_PORT = 1883
@@ -313,6 +320,7 @@ def send_aggregated():
         return
     payload = {
         "device_id": DEVICE_ID,
+        "fw_version": PROJECT_VERSION,
         "temperatures": latest_data["temperatures"].copy(),
         "power_phases": latest_data["power_phases"].copy(),
         "battery": latest_data["battery"].copy(),
