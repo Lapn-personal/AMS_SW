@@ -64,7 +64,7 @@ while True:
         payload = {"wind_speed_mps": round(wind_speed, 1)}
         client.publish(MQTT_TOPIC_WIND, json.dumps(payload), qos=0)
         print(f"[ВЕТЕР] Напряжение: {voltage:.2f} В -> {wind_speed:.1f} м/с")
-        time.sleep(2)
+        time.sleep(3)
     except Exception as e:
         print(f"Ошибка чтения/инициализации ADS1115: {e}")
         ads = None  # сбросим, чтобы пересоздать при следующем цикле

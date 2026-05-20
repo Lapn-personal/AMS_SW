@@ -51,7 +51,7 @@ while True:
             print(f"[РАССТОЯНИЕ] {range_mm} мм")
         else:
             print("[РАССТОЯНИЕ] Ошибка измерения")
-        time.sleep(2)
+        time.sleep(3)
     except Exception as e:
         print(f"Ошибка чтения/датчика: {e}")
         sensor = None  # сбросим, чтобы при следующей итерации переинициализировать

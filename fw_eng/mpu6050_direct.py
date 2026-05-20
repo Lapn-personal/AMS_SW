@@ -8,7 +8,7 @@ import paho.mqtt.client as mqtt
 from smbus2 import SMBus
 
 ADDRESS = 0x68
-DELAY = 0.5
+DELAY = 3
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_USER = "ams_iot"

@@ -11,7 +11,7 @@ MQTT_USER = "ams_iot"
 MQTT_PASS = "ams_iot_pass"
 
 TOPIC = "sensors/illuminance"
-INTERVAL = 10  # секунд
+INTERVAL = 3  # секунд
 
 def main():
     # Инициализация I2C и датчика

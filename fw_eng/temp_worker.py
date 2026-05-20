@@ -11,7 +11,7 @@ MQTT_USER = "ams_iot"
 MQTT_PASS = "ams_iot_pass"
 
 TOPIC_TEMPLATE = "sensors/temperature/{}"
-INTERVAL = 10  # секунд
+INTERVAL = 3  # секунд
 
 def find_soc_temp_file():
     """Ищет файл температуры процессора."""
