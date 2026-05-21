@@ -1,0 +1,32 @@
+# ============================================================
+# Список разрешённых systemd-служб
+# Все службы, не указанные в этом списке, будут остановлены
+# и отключены скриптом service_hardener.sh
+# ============================================================
+# Синтаксис: одна служба на строку, строки начинающиеся с # — комментарии
+# ============================================================
+
+# ========== НАШ ПРОЕКТ ==========
+ams-sensors.service
+
+# ========== УДАЛЁННЫЙ ДОСТУП ==========
+ssh.service
+
+# ========== СИСТЕМНЫЕ СЛУЖБЫ ==========
+systemd-journald.service
+systemd-logind.service
+systemd-timesyncd.service
+systemd-udevd.service
+systemd-random-seed.service
+
+# ========== СЕТЬ ==========
+dhcpcd.service
+wpa_supplicant.service
+systemd-networkd-wait-online.service
+
+# ========== КОНСОЛЬ ==========
+getty@tty1.service
+serial-getty@ttyAMA0.service
+
+# ========== ТЕРМОРЕГУЛИРОВАНИЕ ==========
+thd.service
