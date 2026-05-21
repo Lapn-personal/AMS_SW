@@ -8,6 +8,7 @@
 
 # ========== НАШ ПРОЕКТ ==========
 ams-sensors.service
+mosquitto.service
 
 # ========== УДАЛЁННЫЙ ДОСТУП ==========
 ssh.service

@@ -128,7 +128,7 @@ if command -v mosquitto &>/dev/null 2>&1; then
     if [ ! -f "$MOSQUITTO_PASSWD_FILE" ]; then
         if [ "$EUID" -eq 0 ]; then
             if command -v mosquitto_passwd &>/dev/null; then
-                echo "ams_iot_pass" | mosquitto_passwd -c "$MOSQUITTO_PASSWD_FILE" "ams_iot" 2>&1 || true
+                mosquitto_passwd -c -b "$MOSQUITTO_PASSWD_FILE" "ams_iot" "ams_iot_pass" 2>&1 || true
                 echo "[INIT] Пароль Mosquitto создан"
             fi
         fi
