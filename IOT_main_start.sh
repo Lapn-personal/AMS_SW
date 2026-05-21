@@ -32,12 +32,13 @@ WINDOW="dashboard"
 
 # Функция запуска процесса в панели с авто-перезапуском
 # Использует бесконечный цикл bash, чтобы перезапускать Python-скрипт при падении
+# stdout/stderr перенаправляются в tmux (видно в панелях, но не пишется на SD)
 run_in_pane() {
     local pane="$1"
     local cmd="$2"
     local name="$3"
     /usr/bin/tmux send-keys -t "$SESSION:$WINDOW.$pane" \
-        "cd ~/AMS_SW/fw_eng && source ~/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
+        "cd ~/AMS_SW/fw_eng && source ~/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
 }
 
 # Запускаем все рабочие процессы с авто-перезапуском

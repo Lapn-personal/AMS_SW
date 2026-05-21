@@ -10,6 +10,10 @@ VENV_DIR="$PROJECT_DIR/fw_env"
 REQUIREMENTS="$PROJECT_DIR/requirements.txt"
 VERSION_FILE="$PROJECT_DIR/fw_settings/VERSION"
 
+# Отключаем кэш pip для защиты SD-карты от износа
+export PIP_NO_CACHE_DIR=1
+export PIP_CACHE_DIR=/dev/null
+
 # Читаем версию проекта
 if [ -f "$VERSION_FILE" ]; then
     PROJECT_VERSION=$(cat "$VERSION_FILE" | tr -d ' \n\r\t')
@@ -38,14 +42,14 @@ if [ $? -ne 0 ]; then
 fi
 echo "[INIT] Виртуальное окружение активировано"
 
-# 3. Обновляем pip
+# 3. Обновляем pip (без кэша)
 echo "[INIT] Обновление pip..."
-pip install --upgrade pip --quiet
+pip install --upgrade pip --quiet --no-cache-dir
 
-# 4. Устанавливаем/обновляем зависимости из requirements.txt
+# 4. Устанавливаем/обновляем зависимости из requirements.txt (без кэша)
 if [ -f "$REQUIREMENTS" ]; then
     echo "[INIT] Проверка и обновление Python-библиотек..."
-    pip install --upgrade -r "$REQUIREMENTS" --quiet
+    pip install --upgrade -r "$REQUIREMENTS" --quiet --no-cache-dir
     if [ $? -eq 0 ]; then
         echo "[INIT] Библиотеки обновлены"
     else
@@ -55,7 +59,15 @@ else
     echo "[INIT] Файл requirements.txt не найден, пропускаем обновление библиотек"
 fi
 
-# 5. Запускаем основную программу
+# 5. Отключаем лишние systemd-службы для защиты SD-карты
+echo "[INIT] Проверка и отключение лишних systemd-служб..."
+if [ -f "$PROJECT_DIR/fw_eng/service_hardener.sh" ]; then
+    sudo bash "$PROJECT_DIR/fw_eng/service_hardener.sh" 2>&1 || echo "[INIT] Предупреждение: service_hardener.sh завершился с ошибкой"
+else
+    echo "[INIT] service_hardener.sh не найден, пропускаем"
+fi
+
+# 6. Запускаем основную программу
 echo "[INIT] Запуск IOT_main_start.sh..."
 cd "$PROJECT_DIR"
 exec bash IOT_main_start.sh "$@"
