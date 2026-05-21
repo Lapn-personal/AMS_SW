@@ -24,13 +24,26 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Настройка I2C для AMS Sensors${NC}"
 echo -e "${GREEN}========================================${NC}"
 
+# ========== 0. Установка i2c-tools ==========
+echo ""
+echo -e "${YELLOW}[0/5] Установка i2c-tools...${NC}"
+
+if command -v i2cdetect &> /dev/null; then
+    echo -e "  ${GREEN}✓ i2c-tools уже установлены${NC}"
+else
+    apt-get install -y -qq i2c-tools 2>&1 || echo -e "  ${YELLOW}⚠ Не удалось установить i2c-tools${NC}"
+    if command -v i2cdetect &> /dev/null; then
+        echo -e "  ${GREEN}✓ i2c-tools установлены${NC}"
+    fi
+fi
+
 # ========== 1. Включение I2C в /boot/config.txt ==========
 CONFIG_FILE="/boot/config.txt"
 I2C_DT_PARAM="dtparam=i2c_arm=on"
 I2C_BAUD_PARAM="dtparam=i2c_arm_baudrate=10000"
 
 echo ""
-echo -e "${YELLOW}[1/4] Проверка I2C в $CONFIG_FILE...${NC}"
+echo -e "${YELLOW}[1/5] Проверка I2C в $CONFIG_FILE...${NC}"
 
 if grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE" 2>/dev/null; then
     echo -e "  ${GREEN}✓ I2C уже включён в config.txt${NC}"
@@ -55,7 +68,7 @@ MODULES_FILE="/etc/modules"
 I2C_MODULES=("i2c-dev" "i2c-bcm2835")
 
 echo ""
-echo -e "${YELLOW}[2/4] Проверка модулей I2C в $MODULES_FILE...${NC}"
+echo -e "${YELLOW}[2/5] Проверка модулей I2C в $MODULES_FILE...${NC}"
 
 for module in "${I2C_MODULES[@]}"; do
     if grep -q "^$module" "$MODULES_FILE" 2>/dev/null; then
@@ -77,7 +90,7 @@ echo -e "  ${GREEN}✓ Модули загружены${NC}"
 TARGET_USER="${SUDO_USER:-ams-root}"
 
 echo ""
-echo -e "${YELLOW}[3/4] Добавление пользователя $TARGET_USER в группу i2c...${NC}"
+echo -e "${YELLOW}[3/5] Добавление пользователя $TARGET_USER в группу i2c...${NC}"
 
 if getent group i2c > /dev/null 2>&1; then
     if id -nG "$TARGET_USER" | grep -qw "i2c"; then
@@ -97,7 +110,7 @@ fi
 UDEV_RULE_FILE="/etc/udev/rules.d/99-i2c.rules"
 
 echo ""
-echo -e "${YELLOW}[4/4] Настройка udev-правила для I2C...${NC}"
+echo -e "${YELLOW}[4/5] Настройка udev-правила для I2C...${NC}"
 
 if [ -f "$UDEV_RULE_FILE" ]; then
     echo -e "  ${GREEN}✓ udev-правило уже существует${NC}"

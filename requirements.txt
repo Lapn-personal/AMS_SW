@@ -5,3 +5,5 @@ adafruit-circuitpython-ads1x15>=2.2.22
 adafruit-circuitpython-tsl2561>=2.3.1
 adafruit-circuitpython-mpu6050>=1.1.10
 adafruit-circuitpython-ina219>=2.1.0
+ina219>=0.2.5
+# (для ina219_reader.py используется библиотека ina219 от Christopher Phan)

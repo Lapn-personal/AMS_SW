@@ -359,9 +359,9 @@ def on_remote_message(client, userdata, msg):
         print(f"Ошибка удалённого обработчика: {e}")
 
 # ========== ПЕРЕПОДКЛЮЧЕНИЕ К УДАЛЁННОМУ БРОКЕРУ ==========
-def on_remote_disconnect(client, userdata, rc):
+def on_remote_disconnect(client, userdata, flags, reasonCode, properties):
     """Callback при потере соединения с удалённым брокером."""
-    print(f"[MQTT] Удалённый брокер отключён (код: {rc}). Попытка переподключения...")
+    print(f"[MQTT] Удалённый брокер отключён (код: {reasonCode}). Попытка переподключения...")
 
 def connect_remote_with_retry():
     """Подключается к удалённому брокеру с бесконечными повторами."""
