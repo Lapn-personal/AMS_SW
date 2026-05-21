@@ -21,6 +21,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Settings — игнорируем всё, кроме VERSION
+# Settings — игнорируем всё, кроме VERSION и allowed_services.txt
 fw_settings/*
 !fw_settings/VERSION
+!fw_settings/allowed_services.txt
