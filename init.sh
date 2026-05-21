@@ -54,7 +54,8 @@ done
 if [ -z "$PYTHON_CMD" ]; then
     echo "[INIT] Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+ не найден. Устанавливаю..."
     if [ "$EUID" -eq 0 ]; then
-        apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv 2>&1 || true
+        apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv python3-dev 2>&1 || true
+
         # Проверяем ещё раз после установки
         for candidate in python3 python3.11 python3.10 python3.9; do
             if result=$(check_python "$candidate"); then

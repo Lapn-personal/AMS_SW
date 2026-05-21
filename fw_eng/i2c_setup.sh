@@ -27,6 +27,7 @@ echo -e "${GREEN}========================================${NC}"
 # ========== 1. Включение I2C в /boot/config.txt ==========
 CONFIG_FILE="/boot/config.txt"
 I2C_DT_PARAM="dtparam=i2c_arm=on"
+I2C_BAUD_PARAM="dtparam=i2c_arm_baudrate=10000"
 
 echo ""
 echo -e "${YELLOW}[1/4] Проверка I2C в $CONFIG_FILE...${NC}"
@@ -37,6 +38,17 @@ else
     echo "$I2C_DT_PARAM" >> "$CONFIG_FILE"
     echo -e "  ${GREEN}✓ I2C добавлен в config.txt (потребуется перезагрузка)${NC}"
 fi
+
+# Установка скорости I2C 10000 (10 кГц) для стабильной работы с длинными проводами
+if grep -q "^dtparam=i2c_arm_baudrate" "$CONFIG_FILE" 2>/dev/null; then
+    # Заменяем существующую строку
+    sed -i "s/^dtparam=i2c_arm_baudrate=.*/$I2C_BAUD_PARAM/" "$CONFIG_FILE"
+    echo -e "  ${GREEN}✓ Скорость I2C обновлена до 10000${NC}"
+else
+    echo "$I2C_BAUD_PARAM" >> "$CONFIG_FILE"
+    echo -e "  ${GREEN}✓ Скорость I2C установлена на 10000 (10 кГц)${NC}"
+fi
+
 
 # ========== 2. Добавление модулей i2c в /etc/modules ==========
 MODULES_FILE="/etc/modules"
