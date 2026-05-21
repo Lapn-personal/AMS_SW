@@ -2,6 +2,8 @@
 import os
 import time
 import json
+import sys
+import signal
 import paho.mqtt.client as mqtt
 
 # Конфигурация локального MQTT
@@ -12,6 +14,8 @@ MQTT_PASS = "ams_iot_pass"
 
 TOPIC_TEMPLATE = "sensors/temperature/{}"
 INTERVAL = 3  # секунд
+
+shutdown_flag = False
 
 def find_soc_temp_file():
     """Ищет файл температуры процессора."""
@@ -79,16 +83,49 @@ def read_1wire_temperature(sensor_id):
             pass
     return None
 
-def main():
+def connect_mqtt():
+    """Подключается к MQTT с бесконечными повторами."""
     client = mqtt.Client()
     client.username_pw_set(MQTT_USER, MQTT_PASS)
-    client.connect(MQTT_HOST, MQTT_PORT)
-    client.loop_start()
+    while not shutdown_flag:
+        try:
+            client.connect(MQTT_HOST, MQTT_PORT)
+            client.loop_start()
+            print("Temp worker: MQTT подключён")
+            return client
+        except Exception as e:
+            print(f"Temp worker: Ошибка подключения к MQTT: {e}, повтор через 5 сек...")
+            time.sleep(5)
+    return None
+
+def signal_handler(signum, frame):
+    global shutdown_flag
+    print(f"\n[TEMP] Получен сигнал {signum}. Завершаем работу...")
+    shutdown_flag = True
+
+def main():
+    global shutdown_flag
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    client = connect_mqtt()
+    if client is None:
+        return
 
     print("Скрипт 1-Wire температуры запущен")
-    while True:
+    while not shutdown_flag:
+        # Проверка соединения с MQTT
+        if not client.is_connected():
+            print("Temp worker: MQTT разорван, переподключаемся...")
+            client = connect_mqtt()
+            if client is None:
+                break
+            continue
+
         sensors = find_all_1wire_sensors()
         for sid in sensors:
+            if shutdown_flag:
+                break
             hwd_temp = read_soc_temp()
             out_temp = read_1wire_temperature(sid)
             if out_temp is not None:
@@ -97,11 +134,21 @@ def main():
                     "out_temperature": out_temp
                 })
                 topic = TOPIC_TEMPLATE.format(sid)
-                client.publish(topic, payload, qos=0)
-                print(f"Published {topic}: HDW-TEMP:{hwd_temp}°C, OUT-TEMP:{out_temp}°C")
+                try:
+                    client.publish(topic, payload, qos=0)
+                    print(f"Published {topic}: HDW-TEMP:{hwd_temp}°C, OUT-TEMP:{out_temp}°C")
+                except Exception as e:
+                    print(f"Ошибка публикации {topic}: {e}")
             else:
                 print(f"Ошибка чтения {sid}")
-        time.sleep(INTERVAL)
+        
+        # Ожидание с проверкой shutdown_flag
+        for _ in range(INTERVAL):
+            if shutdown_flag:
+                break
+            time.sleep(1)
+    
+    print("[TEMP] Завершён.")
 
 if __name__ == "__main__":
     main()

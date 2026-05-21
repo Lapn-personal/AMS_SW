@@ -5,6 +5,7 @@ import threading
 import random
 import sys
 import os
+import signal
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
@@ -38,6 +39,20 @@ WIND_ALERT_THRESHOLD = 10.0
 THRESHOLD_TILT = 5.0
 COOLDOWN_SECONDS = 120
 
+# Watchdog: максимальное время без данных от каждого воркера (сек)
+WATCHDOG_TIMEOUT = {
+    "temperature": 120,   # ожидаем раз в 3 сек * 40 = 120 сек запаса
+    "distance": 30,       # раз в 3 сек
+    "wind": 30,           # раз в 3 сек
+    "tilt": 30,           # раз в 3 сек
+    "power": 120,         # раз в 30 сек (эмуляция)
+    "battery": 120,       # раз в 30 сек (эмуляция)
+}
+WATCHDOG_CHECK_INTERVAL = 60  # проверка раз в минуту
+
+# Таймаут регистрации (сек) — если за это время не получен UID, перезапускаемся
+REGISTRATION_TIMEOUT = 300  # 5 минут
+
 # Глобальные переменные для регистрации
 DEVICE_ID = None
 TOPIC_REMOTE_TELEMETRY = None
@@ -55,6 +70,16 @@ latest_data = {
     "tilt": {"tilt_degrees": None}
 }
 
+# Watchdog: время последнего обновления каждого типа данных
+last_data_time = {
+    "temperature": 0,
+    "distance": 0,
+    "wind": 0,
+    "tilt": 0,
+    "power": 0,
+    "battery": 0,
+}
+
 prev_power_state = {
     "phases": {"L1": None, "L2": None, "L3": None},
     "battery": None
@@ -63,8 +88,12 @@ last_alert_time = {
     "overheat": 0,
     "high_wind": 0,
     "excessive_tilt": 0,
-    "power_state_change": 0
+    "power_state_change": 0,
+    "watchdog": 0
 }
+
+# Флаг для graceful shutdown
+shutdown_flag = False
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 def get_iso_timestamp():
@@ -109,6 +138,51 @@ def set_device_id(uid):
     TOPIC_COMMAND = f"ams/{DEVICE_ID}/command"
     print(f"[РЕГИСТРАЦИЯ] Устройство работает как {DEVICE_ID}")
 
+def safe_remote_client():
+    """Возвращает remote_client или None, если он ещё не инициализирован."""
+    try:
+        return remote_client
+    except NameError:
+        return None
+
+# ========== WATCHDOG ==========
+def check_watchdog():
+    """Проверяет, не зависли ли воркеры. Если данные не обновлялись дольше таймаута — шлёт алерт."""
+    now = time.time()
+    remote = safe_remote_client()
+    for data_type, timeout in WATCHDOG_TIMEOUT.items():
+        last_time = last_data_time.get(data_type, 0)
+        if last_time == 0:
+            continue  # данные ещё ни разу не приходили
+        elapsed = now - last_time
+        if elapsed > timeout:
+            # Шлём watchdog-алерт (не чаще раза в COOLDOWN_SECONDS)
+            alert_key = f"watchdog_{data_type}"
+            if now - last_alert_time.get(alert_key, 0) > COOLDOWN_SECONDS:
+                last_alert_time[alert_key] = now
+                msg = f"Watchdog: {data_type} не обновлялся {elapsed:.0f} сек (таймаут {timeout} сек)"
+                print(f"[WATCHDOG] {msg}")
+                if remote is not None and DEVICE_ID is not None:
+                    try:
+                        payload = {
+                            "device_id": DEVICE_ID,
+                            "alert_type": "watchdog",
+                            "severity": "warning",
+                            "value": round(elapsed, 0),
+                            "threshold": timeout,
+                            "message": msg,
+                            "timestamp": get_iso_timestamp()
+                        }
+                        remote.publish(TOPIC_REMOTE_ALERT, json.dumps(payload), qos=1)
+                    except Exception as e:
+                        print(f"Ошибка отправки watchdog-алерта: {e}")
+
+def watchdog_loop():
+    """Фоновый поток проверки watchdog."""
+    while not shutdown_flag:
+        time.sleep(WATCHDOG_CHECK_INTERVAL)
+        check_watchdog()
+
 # ========== АЛЕРТЫ ==========
 def send_alert(remote_client, alert_type, severity, value, threshold, message):
     now = time.time()
@@ -131,6 +205,8 @@ def send_alert(remote_client, alert_type, severity, value, threshold, message):
         print(f"Ошибка отправки алерта: {e}")
 
 def check_alerts(remote_client):
+    if remote_client is None:
+        return
     max_hdw = None
     for _, temp_str in latest_data["temperatures"].items():
         try:
@@ -202,36 +278,47 @@ def on_local_message(client, userdata, msg):
             out = payload.get("out_temperature")
             if hdw is not None and out is not None:
                 latest_data["temperatures"][sensor_id] = f"HDW:{hdw}, OUT:{out}"
-                if DEVICE_ID is not None:
-                    check_alerts(remote_client)
+                last_data_time["temperature"] = time.time()
+                remote = safe_remote_client()
+                if DEVICE_ID is not None and remote is not None:
+                    check_alerts(remote)
         elif topic == "sensors/distance":
             dist = payload.get("distance_mm")
             if dist is not None:
                 latest_data["distance"] = dist
+                last_data_time["distance"] = time.time()
         elif topic == "sensors/wind":
             speed = payload.get("wind_speed_mps")
             if speed is not None:
                 latest_data["wind"]["wind_speed_mps"] = speed
-                if DEVICE_ID is not None:
-                    check_alerts(remote_client)
+                last_data_time["wind"] = time.time()
+                remote = safe_remote_client()
+                if DEVICE_ID is not None and remote is not None:
+                    check_alerts(remote)
         elif topic == "sensors/tilt":
             angle = payload.get("tilt_degrees")
             if angle is not None:
                 latest_data["tilt"]["tilt_degrees"] = angle
-                if DEVICE_ID is not None:
-                    check_alerts(remote_client)
+                last_data_time["tilt"] = time.time()
+                remote = safe_remote_client()
+                if DEVICE_ID is not None and remote is not None:
+                    check_alerts(remote)
         elif topic == "sensors/power":
             phases = payload.get("phases")
             if phases:
                 latest_data["power_phases"] = phases
-                if DEVICE_ID is not None:
-                    check_alerts(remote_client)
+                last_data_time["power"] = time.time()
+                remote = safe_remote_client()
+                if DEVICE_ID is not None and remote is not None:
+                    check_alerts(remote)
         elif topic == "sensors/battery":
             state = payload.get("battery_state")
             if state is not None:
                 latest_data["battery"]["battery_state"] = state
-                if DEVICE_ID is not None:
-                    check_alerts(remote_client)
+                last_data_time["battery"] = time.time()
+                remote = safe_remote_client()
+                if DEVICE_ID is not None and remote is not None:
+                    check_alerts(remote)
     except Exception as e:
         print(f"Ошибка локального обработчика {topic}: {e}")
 
@@ -271,6 +358,28 @@ def on_remote_message(client, userdata, msg):
     except Exception as e:
         print(f"Ошибка удалённого обработчика: {e}")
 
+# ========== ПЕРЕПОДКЛЮЧЕНИЕ К УДАЛЁННОМУ БРОКЕРУ ==========
+def on_remote_disconnect(client, userdata, rc):
+    """Callback при потере соединения с удалённым брокером."""
+    print(f"[MQTT] Удалённый брокер отключён (код: {rc}). Попытка переподключения...")
+
+def connect_remote_with_retry():
+    """Подключается к удалённому брокеру с бесконечными повторами."""
+    client = mqtt.Client()
+    client.on_message = on_remote_message
+    client.on_disconnect = on_remote_disconnect
+    while not shutdown_flag:
+        try:
+            client.username_pw_set(REMOTE_USER, REMOTE_PASS)
+            client.connect(REMOTE_BROKER, REMOTE_PORT)
+            client.loop_start()
+            print("Удалённый MQTT брокер подключён")
+            return client
+        except Exception as e:
+            print(f"Ошибка подключения к удалённому брокеру: {e}, повтор через 5 сек")
+            time.sleep(5)
+    return None
+
 # ========== РЕГИСТРАЦИОННЫЙ ЦИКЛ ==========
 def registration_loop(remote_client):
     global current_temp_uid
@@ -283,8 +392,17 @@ def registration_loop(remote_client):
     print(f"[РЕГИСТРАЦИЯ] Подписан на {reg_topic_command}")
     
     last_publish = 0
-    while True:
+    registration_start = time.time()
+    
+    while not shutdown_flag:
         now = time.time()
+        
+        # Таймаут регистрации — если за REGISTRATION_TIMEOUT не получили UID, перезапускаемся
+        if now - registration_start > REGISTRATION_TIMEOUT:
+            print(f"[РЕГИСТРАЦИЯ] Таймаут {REGISTRATION_TIMEOUT} сек истёк. Перезапуск агрегатора...")
+            time.sleep(1)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        
         if now - last_publish >= 60:
             payload = json.dumps({"uid": current_temp_uid, "status": "registering"})
             remote_client.publish(reg_topic_telemetry, payload, qos=1)
@@ -318,6 +436,10 @@ def publish_with_retry(client, topic, payload, max_retries=3):
 def send_aggregated():
     if DEVICE_ID is None:
         return
+    remote = safe_remote_client()
+    if remote is None or not remote.is_connected():
+        print("[ОТПРАВКА] Удалённый брокер недоступен, пропускаем отправку")
+        return
     payload = {
         "device_id": DEVICE_ID,
         "fw_version": PROJECT_VERSION,
@@ -335,25 +457,43 @@ def send_aggregated():
         if not payload[key] or all(v is None for v in payload[key].values()):
             del payload[key]
     payload_json = json.dumps(payload)
-    if publish_with_retry(remote_client, TOPIC_REMOTE_TELEMETRY, payload_json):
+    if publish_with_retry(remote, TOPIC_REMOTE_TELEMETRY, payload_json):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Отправлено: {len(payload.get('temperatures', {}))} темп, dist={payload.get('distance_mm')}, ветер={payload.get('wind', {}).get('wind_speed_mps')}, наклон={payload.get('tilt', {}).get('tilt_degrees')}")
 
 def remote_loop():
-    while True:
+    while not shutdown_flag:
         send_aggregated()
-        time.sleep(INTERVAL)
+        # Ждём с проверкой shutdown_flag каждую секунду
+        for _ in range(INTERVAL):
+            if shutdown_flag:
+                return
+            time.sleep(1)
 
 def emulation_loop(local_client):
-    while EMULATION_ENABLED:
+    while not shutdown_flag and EMULATION_ENABLED:
         publish_emulated_sensors(local_client)
-        time.sleep(30)
+        # Ждём с проверкой shutdown_flag каждую секунду
+        for _ in range(30):
+            if shutdown_flag:
+                return
+            time.sleep(1)
+
+# ========== ОБРАБОТКА ЗАВЕРШЕНИЯ ==========
+def signal_handler(signum, frame):
+    global shutdown_flag
+    print(f"\n[ЗАВЕРШЕНИЕ] Получен сигнал {signum}. Завершаем работу...")
+    shutdown_flag = True
 
 # ========== MAIN ==========
 if __name__ == "__main__":
+    # Устанавливаем обработчики сигналов для graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     # Локальный брокер (для датчиков)
     local_client = mqtt.Client()
     local_client.on_message = on_local_message
-    while True:
+    while not shutdown_flag:
         try:
             local_client.username_pw_set(LOCAL_USER, LOCAL_PASS)
             local_client.connect(LOCAL_BROKER, LOCAL_PORT)
@@ -364,21 +504,16 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Ошибка подключения к локальному брокеру: {e}, повтор через 5 сек")
             time.sleep(5)
-
+    
+    if shutdown_flag:
+        sys.exit(0)
+    
     # Удалённый брокер
-    remote_client = mqtt.Client()
-    remote_client.on_message = on_remote_message
-    while True:
-        try:
-            remote_client.username_pw_set(REMOTE_USER, REMOTE_PASS)
-            remote_client.connect(REMOTE_BROKER, REMOTE_PORT)
-            remote_client.loop_start()
-            print("Удалённый MQTT брокер подключён")
-            break
-        except Exception as e:
-            print(f"Ошибка подключения к удалённому брокеру: {e}, повтор через 5 сек")
-            time.sleep(5)
-
+    remote_client = connect_remote_with_retry()
+    
+    if shutdown_flag:
+        sys.exit(0)
+    
     # Проверяем наличие постоянного UID
     permanent_uid = load_or_create_uid()
     if permanent_uid is None:
@@ -387,14 +522,23 @@ if __name__ == "__main__":
     else:
         set_device_id(permanent_uid)
         print(f"Устройство зарегистрировано как {DEVICE_ID}. Запуск основного цикла.")
-
+    
+    if shutdown_flag:
+        sys.exit(0)
+    
     # Инициализация
     prev_power_state["phases"] = latest_data["power_phases"].copy()
     prev_power_state["battery"] = latest_data["battery"]["battery_state"]
-
+    
+    # Запуск watchdog
+    watchdog_thread = threading.Thread(target=watchdog_loop, daemon=True)
+    watchdog_thread.start()
+    print("Watchdog активен (проверка каждые 60 сек)")
+    
     if EMULATION_ENABLED:
         emu_thread = threading.Thread(target=emulation_loop, args=(local_client,), daemon=True)
         emu_thread.start()
         print("Эмуляция фазы/батареи активна (каждые 30 с)")
-
+    
     remote_loop()
+    print("[ЗАВЕРШЕНИЕ] Агрегатор остановлен.")

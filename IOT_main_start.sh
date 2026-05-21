@@ -23,20 +23,30 @@ WINDOW="dashboard"
 /usr/bin/tmux split-window -v -p 50 -t "$SESSION:$WINDOW"   # нижняя правая
 
 # Теперь индексы панелей:
-# 0 – левая верхняя
-# 1 – правая верхняя
-# 2 – левая средняя
-# 3 – правая средняя
-# 4 – левая нижняя
-# 5 – правая нижняя
+# 0 – левая верхняя (temp_worker)
+# 1 – правая верхняя (distance_worker)
+# 2 – левая средняя (mqtt_aggregator)
+# 3 – правая средняя (wind_worker)
+# 4 – левая нижняя (mpu6050)
+# 5 – правая нижняя (htop)
 
-# Запускаем все рабочие процессы
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.0" "cd ~/fw_eng && source ~/fw_env/bin/activate && python3 -u temp_worker.py" C-m
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.1" "cd ~/fw_eng && source ~/fw_env/bin/activate && python3 -u distance_worker.py" C-m
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.2" "cd ~/fw_eng && source ~/fw_env/bin/activate && python3 -u mqtt_aggregator.py" C-m
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.3" "cd ~/fw_eng && source ~/fw_env/bin/activate && python3 -u wind_worker_ads1115.py" C-m
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.4" "cd ~/fw_eng && source ~/fw_env/bin/activate && python3 -u mpu6050_direct.py" C-m
-/usr/bin/tmux send-keys -t "$SESSION:$WINDOW.5" "htop" C-m
+# Функция запуска процесса в панели с авто-перезапуском
+# Использует бесконечный цикл bash, чтобы перезапускать Python-скрипт при падении
+run_in_pane() {
+    local pane="$1"
+    local cmd="$2"
+    local name="$3"
+    /usr/bin/tmux send-keys -t "$SESSION:$WINDOW.$pane" \
+        "cd ~/AMS_SW/fw_eng && source ~/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
+}
+
+# Запускаем все рабочие процессы с авто-перезапуском
+run_in_pane 0 "python3 -u temp_worker.py" "TEMP"
+run_in_pane 1 "python3 -u distance_worker.py" "DISTANCE"
+run_in_pane 2 "python3 -u mqtt_aggregator.py" "AGGREGATOR"
+run_in_pane 3 "python3 -u wind_worker_ads1115.py" "WIND"
+run_in_pane 4 "python3 -u mpu6050_direct.py" "MPU6050"
+run_in_pane 5 "htop"
 
 # Если аргумент --daemon НЕ передан – подключаемся к консоли
 if [ "$1" != "--daemon" ]; then
