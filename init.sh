@@ -100,8 +100,51 @@ else
     echo "[INIT] python3-dev уже установлен"
 fi
 
-# 1. Автоматическая установка systemd-сервиса, если ещё не установлен
+# 1. Установка и настройка локального MQTT-брокера (Mosquitto)
+if ! command -v mosquitto &>/dev/null 2>&1; then
+    echo "[INIT] Mosquitto не установлен. Устанавливаю..."
+    if [ "$EUID" -eq 0 ]; then
+        apt-get install -y -qq mosquitto mosquitto-clients 2>&1 || echo "[INIT] Предупреждение: не удалось установить Mosquitto"
+    else
+        echo "[INIT] Нет прав root для установки Mosquitto"
+    fi
+fi
 
+# Настройка Mosquitto (если установлен)
+if command -v mosquitto &>/dev/null 2>&1; then
+    MOSQUITTO_CONF_SRC="$PROJECT_DIR/fw_settings/mosquitto.conf"
+    MOSQUITTO_CONF_DST="/etc/mosquitto/conf.d/ams_sensors.conf"
+    MOSQUITTO_PASSWD_FILE="/etc/mosquitto/ams_passwd"
+
+    # Копируем конфигурацию
+    if [ -f "$MOSQUITTO_CONF_SRC" ]; then
+        if [ "$EUID" -eq 0 ]; then
+            cp "$MOSQUITTO_CONF_SRC" "$MOSQUITTO_CONF_DST"
+            echo "[INIT] Конфигурация Mosquitto скопирована"
+        fi
+    fi
+
+    # Создаём файл паролей, если его нет
+    if [ ! -f "$MOSQUITTO_PASSWD_FILE" ]; then
+        if [ "$EUID" -eq 0 ]; then
+            if command -v mosquitto_passwd &>/dev/null; then
+                echo "ams_iot_pass" | mosquitto_passwd -c "$MOSQUITTO_PASSWD_FILE" "ams_iot" 2>&1 || true
+                echo "[INIT] Пароль Mosquitto создан"
+            fi
+        fi
+    fi
+
+    # Запускаем и включаем Mosquitto
+    if [ "$EUID" -eq 0 ]; then
+        systemctl enable mosquitto 2>&1 || true
+        systemctl restart mosquitto 2>&1 || true
+        echo "[INIT] Mosquitto запущен"
+    fi
+else
+    echo "[INIT] Mosquitto не установлен, пропускаем настройку"
+fi
+
+# 2. Автоматическая установка systemd-сервиса, если ещё не установлен
 SERVICE_NAME="ams-sensors.service"
 SERVICE_DST="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_SRC="$PROJECT_DIR/services/$SERVICE_NAME"
@@ -121,7 +164,7 @@ else
     echo "[INIT] Сервис $SERVICE_NAME уже установлен"
 fi
 
-# 2. Создаём виртуальное окружение, если его нет
+# 3. Создаём виртуальное окружение, если его нет
 if [ ! -d "$VENV_DIR" ]; then
     echo "[INIT] Создание виртуального окружения..."
     $PYTHON_CMD -m venv "$VENV_DIR"
@@ -131,7 +174,7 @@ if [ ! -d "$VENV_DIR" ]; then
     fi
 fi
 
-# 3. Активируем виртуальное окружение
+# 4. Активируем виртуальное окружение
 source "$VENV_DIR/bin/activate"
 if [ $? -ne 0 ]; then
     echo "[INIT] ОШИБКА: не удалось активировать виртуальное окружение"
@@ -139,11 +182,11 @@ if [ $? -ne 0 ]; then
 fi
 echo "[INIT] Виртуальное окружение активировано"
 
-# 4. Обновляем pip (без кэша)
+# 5. Обновляем pip (без кэша)
 echo "[INIT] Обновление pip..."
 pip install --upgrade pip --quiet --no-cache-dir
 
-# 5. Устанавливаем/обновляем зависимости из requirements.txt (без кэша)
+# 6. Устанавливаем/обновляем зависимости из requirements.txt (без кэша)
 if [ -f "$REQUIREMENTS" ]; then
     echo "[INIT] Проверка и обновление Python-библиотек..."
     pip install --upgrade -r "$REQUIREMENTS" --quiet --no-cache-dir
@@ -156,7 +199,7 @@ else
     echo "[INIT] Файл requirements.txt не найден, пропускаем обновление библиотек"
 fi
 
-# 6. Отключаем лишние systemd-службы для защиты SD-карты
+# 7. Отключаем лишние systemd-службы для защиты SD-карты
 echo "[INIT] Проверка и отключение лишних systemd-служб..."
 if [ -f "$PROJECT_DIR/fw_eng/service_hardener.sh" ]; then
     sudo bash "$PROJECT_DIR/fw_eng/service_hardener.sh" 2>&1 || echo "[INIT] Предупреждение: service_hardener.sh завершился с ошибкой"
@@ -164,7 +207,7 @@ else
     echo "[INIT] service_hardener.sh не найден, пропускаем"
 fi
 
-# 7. Настройка I2C (если ещё не настроен)
+# 8. Настройка I2C (если ещё не настроен)
 echo "[INIT] Проверка и настройка I2C..."
 if [ -f "$PROJECT_DIR/fw_eng/i2c_setup.sh" ]; then
     sudo bash "$PROJECT_DIR/fw_eng/i2c_setup.sh" 2>&1 || echo "[INIT] Предупреждение: i2c_setup.sh завершился с ошибкой"
@@ -172,8 +215,7 @@ else
     echo "[INIT] i2c_setup.sh не найден, пропускаем"
 fi
 
-# 8. Запускаем основную программу
-
+# 9. Запускаем основную программу
 echo "[INIT] Запуск IOT_main_start.sh..."
 cd "$PROJECT_DIR"
 if [ "$1" = "--daemon" ]; then

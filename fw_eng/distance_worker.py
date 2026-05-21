@@ -24,7 +24,7 @@ shutdown_flag = False
 
 # ========== ПОДКЛЮЧЕНИЕ К MQTT С ПОВТОРАМИ ==========
 def connect_mqtt():
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     while not shutdown_flag:
         try:

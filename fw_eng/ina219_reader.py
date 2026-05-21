@@ -35,7 +35,7 @@ def mv_to_wind_speed(mv):
 
 def connect_mqtt():
     """Подключается к MQTT с бесконечными повторами."""
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     while not shutdown_flag:
         try:

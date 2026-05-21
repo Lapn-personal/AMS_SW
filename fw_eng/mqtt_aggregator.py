@@ -365,7 +365,7 @@ def on_remote_disconnect(client, userdata, rc):
 
 def connect_remote_with_retry():
     """Подключается к удалённому брокеру с бесконечными повторами."""
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_message = on_remote_message
     client.on_disconnect = on_remote_disconnect
     while not shutdown_flag:
@@ -491,7 +491,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     
     # Локальный брокер (для датчиков)
-    local_client = mqtt.Client()
+    local_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     local_client.on_message = on_local_message
     while not shutdown_flag:
         try:
