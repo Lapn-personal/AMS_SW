@@ -234,15 +234,14 @@ fi
 
 # 10. Запускаем основную программу от ams-root
 echo "[INIT] Запуск IOT_main_start.sh от ams-root..."
-cd "$PROJECT_DIR"
 if [ "$1" = "--daemon" ]; then
     # При запуске из systemd — передаём --daemon, чтобы не цеплять tmux attach
     # tmux сессия создаётся от ams-root, чтобы пользователь мог подключиться без sudo
-    runuser -u ams-root -- bash IOT_main_start.sh --daemon
+    runuser -u ams-root -- bash "$PROJECT_DIR/IOT_main_start.sh" --daemon
     # Оставляем процесс в памяти, чтобы systemd видел сервис запущенным
     # и мог перезапустить при падении (Restart=always)
     echo "[INIT] Сервис запущен. Ожидание завершения..."
     exec sleep infinity
 else
-    exec runuser -u ams-root -- bash IOT_main_start.sh "$@"
+    exec runuser -u ams-root -- bash "$PROJECT_DIR/IOT_main_start.sh" "$@"
 fi
