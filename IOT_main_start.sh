@@ -1,55 +1,44 @@
 #!/bin/bash
+# ============================================================
+# IOT_main_start.sh — Запуск всех воркеров в tmux
+# Каждый воркер в отдельном окне + окно dashboard
+# ============================================================
 
-SESSION="sensors_dashboard"
-WINDOW="dashboard"
+SESSION="ams_sensors"
+PROJECT_DIR="/home/ams-root/AMS_SW"
+VENV_DIR="$PROJECT_DIR/fw_env"
+FW_ENG_DIR="$PROJECT_DIR/fw_eng"
 
-# Убиваем старую сессию
+# Убиваем старую сессию, если есть
 /usr/bin/tmux kill-session -t "$SESSION" 2>/dev/null
 
-# Создаём сессию с одной панелью
-/usr/bin/tmux new-session -d -s "$SESSION" -n "$WINDOW"
+# Создаём новую сессию с первым окном (dashboard)
+/usr/bin/tmux new-session -d -s "$SESSION" -n "dashboard"
 
-# Первое вертикальное разделение на левую и правую половины
-/usr/bin/tmux split-window -h -t "$SESSION:$WINDOW"
-
-# Левая половина: разделим на три вертикальные панели (0, 2, 4)
-/usr/bin/tmux select-pane -t "$SESSION:$WINDOW.0"
-/usr/bin/tmux split-window -v -p 66 -t "$SESSION:$WINDOW"   # верхняя средняя левая
-/usr/bin/tmux split-window -v -p 50 -t "$SESSION:$WINDOW"   # нижняя левая
-
-# Правая половина: разделим на три вертикальные панели (1, 3, 5)
-/usr/bin/tmux select-pane -t "$SESSION:$WINDOW.1"
-/usr/bin/tmux split-window -v -p 66 -t "$SESSION:$WINDOW"   # верхняя средняя правая
-/usr/bin/tmux split-window -v -p 50 -t "$SESSION:$WINDOW"   # нижняя правая
-
-# Теперь индексы панелей:
-# 0 – левая верхняя (temp_worker)
-# 1 – правая верхняя (distance_worker)
-# 2 – левая средняя (mqtt_aggregator)
-# 3 – правая средняя (wind_worker)
-# 4 – левая нижняя (mpu6050)
-# 5 – правая нижняя (htop)
-
-# Функция запуска процесса в панели с авто-перезапуском
-# Использует бесконечный цикл bash, чтобы перезапускать Python-скрипт при падении
-# stdout/stderr перенаправляются в tmux (видно в панелях, но не пишется на SD)
-run_in_pane() {
-    local pane="$1"
+# Функция запуска процесса в отдельном окне с авто-перезапуском
+run_in_window() {
+    local window_name="$1"
     local cmd="$2"
-    local name="$3"
-    /usr/bin/tmux send-keys -t "$SESSION:$WINDOW.$pane" \
-        "cd /home/ams-root/AMS_SW/fw_eng && source /home/ams-root/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
+    local display_name="$3"
+    /usr/bin/tmux new-window -t "$SESSION" -n "$window_name"
+    /usr/bin/tmux send-keys -t "$SESSION:$window_name" \
+        "cd $FW_ENG_DIR && source $VENV_DIR/bin/activate && while true; do echo \"[ЗАПУСК $display_name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $display_name через 3 сек...]\"; sleep 3; done" C-m
 }
 
-# Запускаем все рабочие процессы с авто-перезапуском
-run_in_pane 0 "python3 -u temp_worker.py" "TEMP"
-run_in_pane 1 "python3 -u distance_worker.py" "DISTANCE"
-run_in_pane 2 "python3 -u mqtt_aggregator.py" "AGGREGATOR"
-run_in_pane 3 "python3 -u wind_worker_ads1115.py" "WIND"
-run_in_pane 4 "python3 -u mpu6050_direct.py" "MPU6050"
-run_in_pane 5 "htop"
+# Запускаем каждый воркер в отдельном окне
+run_in_window "temp"      "python3 -u temp_worker.py"         "TEMP"
+run_in_window "distance"  "python3 -u distance_worker.py"     "DISTANCE"
+run_in_window "wind"      "python3 -u wind_worker_ads1115.py" "WIND"
+run_in_window "mpu6050"   "python3 -u mpu6050_direct.py"      "MPU6050"
+run_in_window "ina219"    "python3 -u ina219_reader.py"       "INA219"
+run_in_window "aggregator" "python3 -u mqtt_aggregator.py"    "AGGREGATOR"
+run_in_window "htop"      "htop"                              "HTOP"
 
-# Если аргумент --daemon НЕ передан – подключаемся к консоли
+# Настраиваем dashboard — окно с информацией о состоянии
+/usr/bin/tmux send-keys -t "$SESSION:dashboard" \
+    "cd $PROJECT_DIR && source $VENV_DIR/bin/activate && while true; do clear; echo '============================================'; echo '  AMS Sensors — Dashboard'; echo '  $(date)'; echo '============================================'; echo ''; echo '  Окна tmux:'; /usr/bin/tmux list-windows -t \"$SESSION\" 2>/dev/null | while IFS= read -r line; do echo \"    \$line\"; done; echo ''; echo '  Процессы воркеров:'; for p in temp_worker distance_worker wind_worker_ads1115 mpu6050_direct ina219_reader mqtt_aggregator; do pid=\$(pgrep -f \"python3.*\$p\" 2>/dev/null | head -1); if [ -n \"\$pid\" ]; then echo \"    ✓ \$p (PID \$pid)\"; else echo \"    ✗ \$p — не запущен\"; fi; done; echo ''; echo '  I2C устройства:'; ls -la /dev/i2c-* 2>/dev/null || echo '    (нет I2C)'; echo ''; echo '  Нажмите Ctrl+C для выхода из dashboard'; echo '  (воркеры продолжат работу в фоне)'; echo '============================================'; sleep 5; done" C-m
+
+# Если аргумент --daemon НЕ передан — подключаемся к dashboard
 if [ "$1" != "--daemon" ]; then
-    /usr/bin/tmux attach-session -t "$SESSION"
+    /usr/bin/tmux attach-session -t "$SESSION:dashboard"
 fi

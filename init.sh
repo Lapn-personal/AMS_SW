@@ -215,12 +215,30 @@ else
     echo "[INIT] i2c_setup.sh не найден, пропускаем"
 fi
 
-# 9. Запускаем основную программу
+# 9. Проверка I2C после настройки
+echo "[INIT] Проверка I2C..."
+if [ -c /dev/i2c-1 ]; then
+    echo "[INIT] I2C-1 доступен"
+elif [ -c /dev/i2c-20 ] || [ -c /dev/i2c-21 ]; then
+    echo "[INIT] I2C-1 не найден, но обнаружены альтернативные шины (i2c-20, i2c-21)"
+    echo "[INIT] Продолжаем запуск — воркеры будут использовать board.SCL/board.SDA"
+else
+    echo "[INIT] I2C не обнаружен!"
+    echo "[INIT] Возможно, требуется перезагрузка для применения настроек из /boot/config.txt"
+    echo "[INIT] Запуск воркеров отложен. После перезагрузки init.sh запустится автоматически."
+    exit 0
+fi
+
+# 10. Запускаем основную программу
 echo "[INIT] Запуск IOT_main_start.sh..."
 cd "$PROJECT_DIR"
 if [ "$1" = "--daemon" ]; then
     # При запуске из systemd — передаём --daemon, чтобы не цеплять tmux attach
-    exec bash IOT_main_start.sh --daemon
+    bash IOT_main_start.sh --daemon
+    # Оставляем процесс в памяти, чтобы systemd видел сервис запущенным
+    # и мог перезапустить при падении (Restart=always)
+    echo "[INIT] Сервис запущен. Ожидание завершения..."
+    exec sleep infinity
 else
     exec bash IOT_main_start.sh "$@"
 fi
