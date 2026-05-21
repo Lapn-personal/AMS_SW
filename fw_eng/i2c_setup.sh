@@ -37,8 +37,18 @@ else
     fi
 fi
 
-# ========== 1. Включение I2C в /boot/config.txt ==========
-CONFIG_FILE="/boot/config.txt"
+# ========== 1. Включение I2C в config.txt ==========
+# На новых Raspberry Pi (Bookworm+) config.txt находится в /boot/firmware/
+# На старых — в /boot/
+if [ -f "/boot/firmware/config.txt" ]; then
+    CONFIG_FILE="/boot/firmware/config.txt"
+elif [ -f "/boot/config.txt" ]; then
+    CONFIG_FILE="/boot/config.txt"
+else
+    echo -e "${RED}ОШИБКА: config.txt не найден ни в /boot/, ни в /boot/firmware/${NC}"
+    exit 1
+fi
+
 I2C_DT_PARAM="dtparam=i2c_arm=on"
 I2C_BAUD_PARAM="dtparam=i2c_arm_baudrate=10000"
 
@@ -49,7 +59,7 @@ if grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE" 2>/dev/null; then
     echo -e "  ${GREEN}✓ I2C уже включён в config.txt${NC}"
 else
     echo "$I2C_DT_PARAM" >> "$CONFIG_FILE"
-    echo -e "  ${GREEN}✓ I2C добавлен в config.txt (потребуется перезагрузка)${NC}"
+    echo -e "  ${GREEN}✓ I2C добавлен в $CONFIG_FILE (потребуется перезагрузка)${NC}"
 fi
 
 # Установка скорости I2C 10000 (10 кГц) для стабильной работы с длинными проводами
