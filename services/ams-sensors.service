@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=ams-root
+User=root
 WorkingDirectory=/home/ams-root/AMS_SW
 ExecStart=/home/ams-root/AMS_SW/init.sh --daemon
 Restart=always

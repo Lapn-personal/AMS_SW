@@ -16,13 +16,15 @@ FW_ENG_DIR="$PROJECT_DIR/fw_eng"
 /usr/bin/tmux new-session -d -s "$SESSION" -n "dashboard"
 
 # Функция запуска процесса в отдельном окне с авто-перезапуском
+# Воркеры запускаются от ams-root (не root), чтобы файлы логов и настройки
+# создавались с правильными правами
 run_in_window() {
     local window_name="$1"
     local cmd="$2"
     local display_name="$3"
     /usr/bin/tmux new-window -t "$SESSION" -n "$window_name"
     /usr/bin/tmux send-keys -t "$SESSION:$window_name" \
-        "cd $FW_ENG_DIR && source $VENV_DIR/bin/activate && while true; do echo \"[ЗАПУСК $display_name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $display_name через 3 сек...]\"; sleep 3; done" C-m
+        "su - ams-root -c 'cd $FW_ENG_DIR && source $VENV_DIR/bin/activate && while true; do echo \"[ЗАПУСК $display_name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $display_name через 3 сек...]\"; sleep 3; done'" C-m
 }
 
 # Запускаем каждый воркер в отдельном окне

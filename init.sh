@@ -205,7 +205,7 @@ fi
 # 7. Отключаем лишние systemd-службы для защиты SD-карты
 echo "[INIT] Проверка и отключение лишних systemd-служб..."
 if [ -f "$PROJECT_DIR/fw_eng/service_hardener.sh" ]; then
-    sudo bash "$PROJECT_DIR/fw_eng/service_hardener.sh" 2>&1 || echo "[INIT] Предупреждение: service_hardener.sh завершился с ошибкой"
+    bash "$PROJECT_DIR/fw_eng/service_hardener.sh" 2>&1 || echo "[INIT] Предупреждение: service_hardener.sh завершился с ошибкой"
 else
     echo "[INIT] service_hardener.sh не найден, пропускаем"
 fi
@@ -213,7 +213,7 @@ fi
 # 8. Настройка I2C (если ещё не настроен)
 echo "[INIT] Проверка и настройка I2C..."
 if [ -f "$PROJECT_DIR/fw_eng/i2c_setup.sh" ]; then
-    sudo bash "$PROJECT_DIR/fw_eng/i2c_setup.sh" 2>&1 || echo "[INIT] Предупреждение: i2c_setup.sh завершился с ошибкой"
+    bash "$PROJECT_DIR/fw_eng/i2c_setup.sh" 2>&1 || echo "[INIT] Предупреждение: i2c_setup.sh завершился с ошибкой"
 else
     echo "[INIT] i2c_setup.sh не найден, пропускаем"
 fi
