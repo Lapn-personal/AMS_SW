@@ -24,7 +24,7 @@ run_in_window() {
     local display_name="$3"
     /usr/bin/tmux new-window -t "$SESSION" -n "$window_name"
     /usr/bin/tmux send-keys -t "$SESSION:$window_name" \
-        "runuser -u ams-root -- bash -c 'cd $FW_ENG_DIR && source $VENV_DIR/bin/activate && while true; do echo \"[ЗАПУСК $display_name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $display_name через 3 сек...]\"; sleep 3; done'" C-m
+        "cd $FW_ENG_DIR && source $VENV_DIR/bin/activate && while true; do echo \"[ЗАПУСК $display_name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $display_name через 3 сек...]\"; sleep 3; done" C-m
 }
 
 # Запускаем каждый воркер в отдельном окне
