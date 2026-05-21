@@ -24,7 +24,28 @@ fi
 echo "[INIT] AMS_SW v$PROJECT_VERSION"
 echo "[INIT] Проект: $PROJECT_DIR"
 
+# 0. Автоматическая установка systemd-сервиса, если ещё не установлен
+SERVICE_NAME="ams-sensors.service"
+SERVICE_DST="/etc/systemd/system/$SERVICE_NAME"
+SERVICE_SRC="$PROJECT_DIR/services/$SERVICE_NAME"
+
+if [ ! -f "$SERVICE_DST" ] && [ -f "$SERVICE_SRC" ]; then
+    echo "[INIT] Сервис $SERVICE_NAME не установлен. Устанавливаю..."
+    if [ "$EUID" -eq 0 ]; then
+        cp "$SERVICE_SRC" "$SERVICE_DST"
+        systemctl daemon-reload
+        systemctl enable "$SERVICE_NAME"
+        systemctl start "$SERVICE_NAME"
+        echo "[INIT] Сервис $SERVICE_NAME установлен и запущен"
+    else
+        echo "[INIT] Нет прав root. Установите вручную: sudo bash $PROJECT_DIR/services/install.sh"
+    fi
+else
+    echo "[INIT] Сервис $SERVICE_NAME уже установлен"
+fi
+
 # 1. Создаём виртуальное окружение, если его нет
+
 if [ ! -d "$VENV_DIR" ]; then
     echo "[INIT] Создание виртуального окружения..."
     python3 -m venv "$VENV_DIR"
