@@ -135,10 +135,31 @@ EOF
     echo -e "  ${GREEN}✓ Правила udev перезагружены${NC}"
 fi
 
+# ========== 5. Включение 1-Wire (для датчиков DS18B20) ==========
+W1_GPIO_PARAM="dtoverlay=w1-gpio"
+W1_GPIO_PIN_PARAM="dtoverlay=w1-gpio,gpiopin=4"  # GPIO4 (пин 7) — стандартный
+
+echo ""
+echo -e "${YELLOW}[5/5] Проверка 1-Wire в $CONFIG_FILE...${NC}"
+
+if grep -q "^dtoverlay=w1-gpio" "$CONFIG_FILE" 2>/dev/null; then
+    echo -e "  ${GREEN}✓ 1-Wire уже включён в config.txt${NC}"
+else
+    echo "$W1_GPIO_PARAM" >> "$CONFIG_FILE"
+    echo -e "  ${GREEN}✓ 1-Wire добавлен в $CONFIG_FILE (потребуется перезагрузка)${NC}"
+fi
+
+# Загружаем модули 1-Wire сейчас (без перезагрузки)
+echo ""
+echo -e "${YELLOW}  Загрузка модулей 1-Wire сейчас...${NC}"
+modprobe w1-gpio 2>/dev/null || true
+modprobe w1-therm 2>/dev/null || true
+echo -e "  ${GREEN}✓ Модули 1-Wire загружены${NC}"
+
 # ========== ИТОГ ==========
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Настройка I2C завершена!${NC}"
+echo -e "${GREEN}  Настройка I2C и 1-Wire завершена!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Проверка доступных I2C-устройств:"
@@ -149,9 +170,17 @@ else
     echo "  Установите: sudo apt install i2c-tools"
 fi
 echo ""
-echo -e "${YELLOW}⚠ ВАЖНО: Если I2C был только что включён в config.txt,${NC}"
+echo "Проверка 1-Wire:"
+if [ -d /sys/bus/w1/devices ]; then
+    ls /sys/bus/w1/devices/ 2>/dev/null || echo "  (нет устройств)"
+else
+    echo "  (1-Wire не активен до перезагрузки)"
+fi
+echo ""
+echo -e "${YELLOW}⚠ ВАЖНО: Если I2C или 1-Wire были только что включены в config.txt,${NC}"
 echo -e "${YELLOW}  перезагрузите Raspberry Pi для применения изменений.${NC}"
 echo ""
 echo "После перезагрузки проверьте:"
 echo "  ls /dev/i2c-*"
 echo "  i2cdetect -y 1"
+echo "  ls /sys/bus/w1/devices/"
