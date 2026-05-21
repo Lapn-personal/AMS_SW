@@ -11,6 +11,9 @@ ams-sensors.service
 
 # ========== УДАЛЁННЫЙ ДОСТУП ==========
 ssh.service
+sshswitch.service
+sshd-keygen.service
+regenerate_ssh_host_keys.service
 
 # ========== СИСТЕМНЫЕ СЛУЖБЫ ==========
 systemd-journald.service
@@ -18,15 +21,36 @@ systemd-logind.service
 systemd-timesyncd.service
 systemd-udevd.service
 systemd-random-seed.service
+systemd-pstore.service
+apparmor.service
+cron.service
+udisks2.service
+e2scrub_reap.service
+rpi-eeprom-update.service
 
 # ========== СЕТЬ ==========
+NetworkManager.service
+NetworkManager-dispatcher.service
+NetworkManager-wait-online.service
 dhcpcd.service
 wpa_supplicant.service
+avahi-daemon.service
+bluetooth.service
 systemd-networkd-wait-online.service
 
 # ========== КОНСОЛЬ ==========
+getty@.service
 getty@tty1.service
 serial-getty@ttyAMA0.service
+console-setup.service
+keyboard-setup.service
 
 # ========== ТЕРМОРЕГУЛИРОВАНИЕ ==========
 thd.service
+
+# ========== ОБЛАЧНАЯ ИНИЦИАЛИЗАЦИЯ ==========
+cloud-config.service
+cloud-final.service
+cloud-init-local.service
+cloud-init-main.service
+cloud-init-network.service

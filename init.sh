@@ -67,7 +67,15 @@ else
     echo "[INIT] service_hardener.sh не найден, пропускаем"
 fi
 
-# 6. Запускаем основную программу
+# 6. Настройка I2C (если ещё не настроен)
+echo "[INIT] Проверка и настройка I2C..."
+if [ -f "$PROJECT_DIR/fw_eng/i2c_setup.sh" ]; then
+    sudo bash "$PROJECT_DIR/fw_eng/i2c_setup.sh" 2>&1 || echo "[INIT] Предупреждение: i2c_setup.sh завершился с ошибкой"
+else
+    echo "[INIT] i2c_setup.sh не найден, пропускаем"
+fi
+
+# 7. Запускаем основную программу
 echo "[INIT] Запуск IOT_main_start.sh..."
 cd "$PROJECT_DIR"
 exec bash IOT_main_start.sh "$@"
