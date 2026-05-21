@@ -16,6 +16,7 @@ sshd-keygen.service
 regenerate_ssh_host_keys.service
 
 # ========== СИСТЕМНЫЕ СЛУЖБЫ ==========
+dbus.service
 systemd-journald.service
 systemd-logind.service
 systemd-timesyncd.service
@@ -27,6 +28,8 @@ cron.service
 udisks2.service
 e2scrub_reap.service
 rpi-eeprom-update.service
+user@1000.service
+
 
 # ========== СЕТЬ ==========
 NetworkManager.service
