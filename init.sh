@@ -14,6 +14,9 @@ VERSION_FILE="$PROJECT_DIR/fw_settings/VERSION"
 export PIP_NO_CACHE_DIR=1
 export PIP_CACHE_DIR=/dev/null
 
+# Добавляем trusted-host для обхода SSL ошибок на некоторых сетях
+export PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
+
 # Читаем версию проекта
 if [ -f "$VERSION_FILE" ]; then
     PROJECT_VERSION=$(cat "$VERSION_FILE" | tr -d ' \n\r\t')
