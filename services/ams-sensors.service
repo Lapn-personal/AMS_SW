@@ -10,10 +10,10 @@ ExecStart=/home/ams-root/AMS_SW/init.sh --daemon
 Restart=always
 RestartSec=10
 
-# Отключаем запись логов на SD-карту (journald)
-# Вывод остаётся только в tmux-панелях (в оперативной памяти)
-StandardOutput=null
-StandardError=null
+# Включаем запись логов в journald для отладки
+# После отладки можно вернуть null
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
