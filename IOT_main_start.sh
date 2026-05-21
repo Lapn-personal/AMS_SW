@@ -38,7 +38,7 @@ run_in_pane() {
     local cmd="$2"
     local name="$3"
     /usr/bin/tmux send-keys -t "$SESSION:$WINDOW.$pane" \
-        "cd ~/AMS_SW/fw_eng && source ~/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
+        "cd /home/ams-root/AMS_SW/fw_eng && source /home/ams-root/AMS_SW/fw_env/bin/activate && while true; do echo \"[ЗАПУСК $name]\"; $cmd 2>&1; echo \"[ПЕРЕЗАПУСК $name через 3 сек...]\"; sleep 3; done" C-m
 }
 
 # Запускаем все рабочие процессы с авто-перезапуском

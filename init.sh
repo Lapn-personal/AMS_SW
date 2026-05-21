@@ -80,7 +80,19 @@ fi
 if ! dpkg -s python3-dev &>/dev/null 2>&1; then
     echo "[INIT] python3-dev не установлен. Устанавливаю..."
     if [ "$EUID" -eq 0 ]; then
-        apt-get install -y -qq python3-dev 2>&1 || echo "[INIT] Предупреждение: не удалось установить python3-dev"
+        # Обновляем индексы пакетов перед установкой
+        apt-get update -qq 2>&1 || true
+
+        # Определяем точную версию Python (например, 3.11, 3.13)
+        PYTHON_FULL_VER=$($PYTHON_CMD --version 2>&1 | grep -oP '\d+\.\d+')
+        DEV_PACKAGE="python${PYTHON_FULL_VER}-dev"
+
+        echo "[INIT] Установка ${DEV_PACKAGE}..."
+        apt-get install -y -qq "$DEV_PACKAGE" 2>&1 || {
+            echo "[INIT] Предупреждение: не удалось установить ${DEV_PACKAGE}"
+            echo "[INIT] Пробуем установить python3-dev как запасной вариант..."
+            apt-get install -y -qq python3-dev 2>&1 || echo "[INIT] Предупреждение: не удалось установить python3-dev"
+        }
     else
         echo "[INIT] Нет прав root для установки python3-dev"
     fi
@@ -112,7 +124,7 @@ fi
 # 2. Создаём виртуальное окружение, если его нет
 if [ ! -d "$VENV_DIR" ]; then
     echo "[INIT] Создание виртуального окружения..."
-    python3 -m venv "$VENV_DIR"
+    $PYTHON_CMD -m venv "$VENV_DIR"
     if [ $? -ne 0 ]; then
         echo "[INIT] ОШИБКА: не удалось создать виртуальное окружение"
         exit 1
@@ -164,4 +176,9 @@ fi
 
 echo "[INIT] Запуск IOT_main_start.sh..."
 cd "$PROJECT_DIR"
-exec bash IOT_main_start.sh "$@"
+if [ "$1" = "--daemon" ]; then
+    # При запуске из systemd — передаём --daemon, чтобы не цеплять tmux attach
+    exec bash IOT_main_start.sh --daemon
+else
+    exec bash IOT_main_start.sh "$@"
+fi
