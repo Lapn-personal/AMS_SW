@@ -76,7 +76,20 @@ else
     echo "[INIT] Python найден: $($PYTHON_CMD --version)"
 fi
 
+# Проверка python3-dev (нужен для сборки C-расширений, например rpi_ws281x, RPi.GPIO)
+if ! dpkg -s python3-dev &>/dev/null 2>&1; then
+    echo "[INIT] python3-dev не установлен. Устанавливаю..."
+    if [ "$EUID" -eq 0 ]; then
+        apt-get install -y -qq python3-dev 2>&1 || echo "[INIT] Предупреждение: не удалось установить python3-dev"
+    else
+        echo "[INIT] Нет прав root для установки python3-dev"
+    fi
+else
+    echo "[INIT] python3-dev уже установлен"
+fi
+
 # 1. Автоматическая установка systemd-сервиса, если ещё не установлен
+
 SERVICE_NAME="ams-sensors.service"
 SERVICE_DST="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_SRC="$PROJECT_DIR/services/$SERVICE_NAME"
