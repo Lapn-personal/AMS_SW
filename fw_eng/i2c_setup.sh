@@ -24,9 +24,9 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Настройка I2C для AMS Sensors${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-# ========== 0. Установка i2c-tools ==========
+# ========== 0. Установка i2c-tools и tmux ==========
 echo ""
-echo -e "${YELLOW}[0/5] Установка i2c-tools...${NC}"
+echo -e "${YELLOW}[0/5] Установка i2c-tools и tmux...${NC}"
 
 if command -v i2cdetect &> /dev/null; then
     echo -e "  ${GREEN}✓ i2c-tools уже установлены${NC}"
@@ -34,6 +34,15 @@ else
     apt-get install -y -qq i2c-tools 2>&1 || echo -e "  ${YELLOW}⚠ Не удалось установить i2c-tools${NC}"
     if command -v i2cdetect &> /dev/null; then
         echo -e "  ${GREEN}✓ i2c-tools установлены${NC}"
+    fi
+fi
+
+if command -v tmux &> /dev/null; then
+    echo -e "  ${GREEN}✓ tmux уже установлен${NC}"
+else
+    apt-get install -y -qq tmux 2>&1 || echo -e "  ${YELLOW}⚠ Не удалось установить tmux${NC}"
+    if command -v tmux &> /dev/null; then
+        echo -e "  ${GREEN}✓ tmux установлен${NC}"
     fi
 fi
 
