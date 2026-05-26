@@ -8,6 +8,9 @@ import signal
 import paho.mqtt.client as mqtt
 from smbus2 import SMBus
 
+# Импортируем I2C-хелперы для стабильности шины
+from i2c_helpers import i2c_bus_reset, i2c_recover
+
 ADDRESS = 0x68
 DELAY = 3
 MQTT_BROKER = "127.0.0.1"
@@ -128,6 +131,9 @@ if __name__ == "__main__":
                 continue
 
             if bus is None:
+                # Встряска шины перед инициализацией
+                i2c_bus_reset()
+                
                 bus = SMBus(1)
                 if not init_sensor(bus):
                     close_bus(bus)
@@ -179,6 +185,7 @@ if __name__ == "__main__":
         # Если слишком много ошибок подряд — полный перезапуск I2C
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"MPU6050: {error_count} ошибок подряд. Полная переинициализация I2C...", flush=True)
+            i2c_recover()
             close_bus(bus)
             bus = None
             error_count = 0

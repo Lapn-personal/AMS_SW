@@ -8,6 +8,9 @@ import busio
 import adafruit_vl53l0x
 import paho.mqtt.client as mqtt
 
+# Импортируем I2C-хелперы для стабильности шины
+from i2c_helpers import i2c_bus_reset, i2c_recover
+
 # ========== НАСТРОЙКИ MQTT ==========
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
@@ -43,6 +46,9 @@ def init_sensor():
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
+            # Встряска шины перед каждой попыткой
+            i2c_bus_reset()
+            
             i2c = busio.I2C(board.SCL, board.SDA)
             sensor = adafruit_vl53l0x.VL53L0X(i2c)
             print(f"VL53L0X: инициализирован (попытка {attempt})")
@@ -119,6 +125,7 @@ if __name__ == "__main__":
         # Если слишком много ошибок подряд — полный перезапуск I2C
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"VL53L0X: {error_count} ошибок подряд. Полная переинициализация I2C...")
+            i2c_recover()
             sensor = None
             error_count = 0
             time.sleep(5)

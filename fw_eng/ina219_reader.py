@@ -7,6 +7,9 @@ import paho.mqtt.client as mqtt
 from ina219 import INA219
 from ina219 import DeviceRangeError
 
+# Импортируем I2C-хелперы для стабильности шины
+from i2c_helpers import i2c_bus_reset, i2c_recover
+
 # ========== НАСТРОЙКИ ==========
 SHUNT_OHMS = 0.1  # не важно, можно оставить
 MQTT_BROKER = "127.0.0.1"
@@ -52,6 +55,9 @@ def init_ina():
     """Инициализирует INA219 с повторными попытками."""
     while not shutdown_flag:
         try:
+            # Встряска шины перед инициализацией
+            i2c_bus_reset()
+            
             ina = INA219(SHUNT_OHMS, busnum=1)
             ina.configure(voltage_range=ina.RANGE_32V, gain=ina.GAIN_AUTO,
                           bus_adc=ina.ADC_12BIT, shunt_adc=ina.ADC_12BIT)
@@ -136,6 +142,7 @@ if __name__ == "__main__":
         # Если слишком много ошибок подряд — перезапускаем I2C
         if error_count >= MAX_SKIP_BEFORE_RESTART:
             print(f"INA219: {error_count} ошибок подряд. Полная переинициализация I2C...")
+            i2c_recover()
             try:
                 ina = init_ina()
             except:

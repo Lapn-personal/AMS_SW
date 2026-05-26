@@ -93,6 +93,25 @@ else
     echo -e "  ${GREEN}✓ Overlay i2c-bcm2708 добавлен (baudrate=10000)${NC}"
 fi
 
+# Включаем I2C recovery для автоматического восстановления шины при зависании
+# Параметр recovery-gpio позволяет ядру отправлять 9 тактов SCL для сброса залипших устройств
+I2C_RECOVERY_PARAM="dtparam=i2c_arm=on,i2c_arm_recovery=gpio"
+if grep -q "i2c_arm_recovery=gpio" "$CONFIG_FILE" 2>/dev/null; then
+    echo -e "  ${GREEN}✓ I2C recovery уже включён${NC}"
+else
+    # Добавляем recovery в существующую строку dtparam=i2c_arm
+    if grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE" 2>/dev/null; then
+        # Если строка уже есть, но без recovery — добавляем параметр
+        if ! grep -q "i2c_arm_recovery" "$CONFIG_FILE" 2>/dev/null; then
+            sed -i "s/^dtparam=i2c_arm=on.*/&,i2c_arm_recovery=gpio/" "$CONFIG_FILE"
+            echo -e "  ${GREEN}✓ I2C recovery добавлен (i2c_arm_recovery=gpio)${NC}"
+        fi
+    else
+        echo "$I2C_DT_PARAM,i2c_arm_recovery=gpio" >> "$CONFIG_FILE"
+        echo -e "  ${GREEN}✓ I2C recovery добавлен (i2c_arm_recovery=gpio)${NC}"
+    fi
+fi
+
 
 # ========== 2. Добавление модулей i2c в /etc/modules ==========
 MODULES_FILE="/etc/modules"
