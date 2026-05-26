@@ -1,8 +1,17 @@
 #!/usr/bin/env python3 -u
+"""
+distance_worker.py — измерение расстояния через VL53L0X.
+
+Использует adafruit_vl53l0x для работы с датчиком.
+Добавлена проверка ID-регистров через i2cget перед инициализацией
+и многоуровневое восстановление шины при ошибках.
+"""
+
 import time
 import json
 import sys
 import signal
+import subprocess
 import board
 import busio
 import adafruit_vl53l0x
@@ -19,11 +28,49 @@ MQTT_PASS = "ams_iot_pass"
 MQTT_TOPIC = "sensors/distance"
 
 # ========== ЗАЩИТА ОТ ЗАВИСАНИЙ ==========
-MAX_I2C_RETRIES = 5
-I2C_RETRY_DELAY = 3
-MAX_ERRORS_BEFORE_RESTART = 10
+MAX_I2C_RETRIES = 10          # увеличено с 5 до 10
+I2C_RETRY_DELAY = 2           # уменьшено для более частых попыток
+MAX_ERRORS_BEFORE_RESTART = 5 # уменьшено — быстрее переходим к recovery
+INIT_DELAY = 3                # задержка перед первой инициализацией (сек)
+
+VL53L0X_ADDR = 0x29
+I2C_BUS = 1
 
 shutdown_flag = False
+
+
+def check_vl53l0x_id():
+    """
+    Проверяет ID-регистры VL53L0X через i2cget.
+    Регистр 0xC0 должен быть 0xEE, регистр 0xC1 должен быть 0xAA.
+    Возвращает True, если значения совпадают.
+    """
+    try:
+        # Регистр 0xC0
+        result0 = subprocess.run(
+            ["i2cget", "-y", str(I2C_BUS), f"0x{VL53L0X_ADDR:02X}", "0xC0"],
+            capture_output=True, text=True, timeout=3
+        )
+        # Регистр 0xC1
+        result1 = subprocess.run(
+            ["i2cget", "-y", str(I2C_BUS), f"0x{VL53L0X_ADDR:02X}", "0xC1"],
+            capture_output=True, text=True, timeout=3
+        )
+        
+        if result0.returncode == 0 and result1.returncode == 0:
+            id0 = int(result0.stdout.strip(), 16)
+            id1 = int(result1.stdout.strip(), 16)
+            if id0 == 0xEE and id1 == 0xAA:
+                return True
+            else:
+                print(f"VL53L0X: ID-регистры: 0xC0=0x{id0:02X}, 0xC1=0x{id1:02X} (ожидалось 0xEE, 0xAA)", flush=True)
+                return False
+        else:
+            return False
+    except Exception as e:
+        print(f"VL53L0X: Ошибка проверки ID-регистров: {e}", flush=True)
+        return False
+
 
 # ========== ПОДКЛЮЧЕНИЕ К MQTT С ПОВТОРАМИ ==========
 def connect_mqtt():
@@ -40,14 +87,24 @@ def connect_mqtt():
             time.sleep(5)
     return None
 
+
 # ========== ИНИЦИАЛИЗАЦИЯ ДАТЧИКА ==========
 def init_sensor():
-    """Инициализирует VL53L0X с повторными попытками."""
+    """Инициализирует VL53L0X с повторными попытками и проверкой ID-регистров."""
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
             # Встряска шины перед каждой попыткой
             i2c_bus_reset()
+            
+            # Проверяем ID-регистры через i2cget (более стабильно, чем busio)
+            if not check_vl53l0x_id():
+                print(f"VL53L0X: ID-регистры не совпадают (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
+                if attempt < MAX_I2C_RETRIES:
+                    delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
+                    print(f"VL53L0X: Повтор через {delay} сек...", flush=True)
+                    time.sleep(delay)
+                continue
             
             i2c = busio.I2C(board.SCL, board.SDA)
             sensor = adafruit_vl53l0x.VL53L0X(i2c)
@@ -57,16 +114,18 @@ def init_sensor():
             last_error = e
             print(f"VL53L0X: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}")
             if attempt < MAX_I2C_RETRIES:
-                delay = I2C_RETRY_DELAY * (2 ** (attempt - 1))
+                delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
                 print(f"VL53L0X: Повтор через {delay} сек...")
                 time.sleep(delay)
     print(f"VL53L0X: Не удалось инициализировать после {MAX_I2C_RETRIES} попыток: {last_error}")
     return None
 
+
 def signal_handler(signum, frame):
     global shutdown_flag
     print(f"\n[VL53L0X] Получен сигнал {signum}. Завершаем работу...")
     shutdown_flag = True
+
 
 # ========== MAIN ==========
 if __name__ == "__main__":
@@ -80,6 +139,7 @@ if __name__ == "__main__":
     
     sensor = None
     error_count = 0
+    first_init = True
 
     while not shutdown_flag:
         try:
@@ -93,6 +153,12 @@ if __name__ == "__main__":
 
             # Инициализация датчика, если ещё не
             if sensor is None:
+                # Задержка перед первой инициализацией
+                if first_init:
+                    print(f"VL53L0X: Ожидание {INIT_DELAY} сек перед первой инициализацией...", flush=True)
+                    time.sleep(INIT_DELAY)
+                    first_init = False
+                
                 sensor = init_sensor()
                 if sensor is None:
                     print("VL53L0X: Датчик недоступен, повтор через 10 сек...")

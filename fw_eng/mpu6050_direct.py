@@ -1,15 +1,24 @@
 #!/usr/bin/env python3 -u
+"""
+mpu6050_direct.py — измерение наклона через MPU6050.
+
+Использует smbus2 для работы с I2C.
+Добавлена проверка WHO_AM_I через i2cget перед инициализацией
+и многоуровневое восстановление шины при ошибках.
+"""
+
 import time
 import math
 import json
 import os
 import sys
 import signal
+import subprocess
 import paho.mqtt.client as mqtt
 from smbus2 import SMBus
 
 # Импортируем I2C-хелперы для стабильности шины
-from i2c_helpers import i2c_bus_reset, i2c_recover
+from i2c_helpers import i2c_bus_reset, i2c_recover, ensure_i2c_ready
 
 ADDRESS = 0x68
 DELAY = 3
@@ -20,11 +29,38 @@ MQTT_PASS = "ams_iot_pass"
 MQTT_TOPIC_TILT = "sensors/tilt"
 
 # ========== ЗАЩИТА ОТ ЗАВИСАНИЙ ==========
-MAX_I2C_RETRIES = 5
-I2C_RETRY_DELAY = 3
-MAX_ERRORS_BEFORE_RESTART = 10
+MAX_I2C_RETRIES = 10          # увеличено с 5 до 10
+I2C_RETRY_DELAY = 2           # уменьшено для более частых попыток
+MAX_ERRORS_BEFORE_RESTART = 5 # уменьшено — быстрее переходим к recovery
+INIT_DELAY = 3                # задержка перед первой инициализацией (сек)
 
 shutdown_flag = False
+
+
+def check_who_am_i():
+    """
+    Проверяет WHO_AM_I регистр MPU6050 через i2cget.
+    Ожидаемое значение: 0x68.
+    Возвращает True, если значение совпадает.
+    """
+    try:
+        result = subprocess.run(
+            ["i2cget", "-y", "1", f"0x{ADDRESS:02X}", "0x75"],
+            capture_output=True, text=True, timeout=3
+        )
+        if result.returncode == 0:
+            val = int(result.stdout.strip(), 16)
+            if val == 0x68:
+                return True
+            else:
+                print(f"MPU6050: WHO_AM_I = 0x{val:02X} (ожидалось 0x68)", flush=True)
+                return False
+        else:
+            return False
+    except Exception as e:
+        print(f"MPU6050: Ошибка проверки WHO_AM_I: {e}", flush=True)
+        return False
+
 
 # ========== ФУНКЦИЯ ЗАГРУЗКИ СМЕЩЕНИЯ ==========
 def load_tilt_offset():
@@ -40,6 +76,7 @@ def load_tilt_offset():
     except Exception:
         return 0.0
 
+
 # ========== ОСТАЛЬНЫЕ ФУНКЦИИ (init_sensor, read_word_signed, read_sensor_data, compute_tilt) ==========
 def init_sensor(bus):
     try:
@@ -50,6 +87,7 @@ def init_sensor(bus):
         print(f"Ошибка инициализации MPU6050: {e}", flush=True)
         return False
 
+
 def read_word_signed(bus, reg):
     high = bus.read_byte_data(ADDRESS, reg)
     low = bus.read_byte_data(ADDRESS, reg + 1)
@@ -57,6 +95,7 @@ def read_word_signed(bus, reg):
     if val > 32767:
         val -= 65536
     return val
+
 
 def read_sensor_data(bus):
     ax = read_word_signed(bus, 0x3B) / 16384.0 * 9.81
@@ -69,6 +108,7 @@ def read_sensor_data(bus):
     temp = temp_raw / 340.0 + 36.53
     return (ax, ay, az, gx, gy, gz, temp)
 
+
 def compute_tilt(ax, ay, az):
     ax_g = ax / 9.81
     ay_g = ay / 9.81
@@ -79,6 +119,7 @@ def compute_tilt(ax, ay, az):
     angle_rad = math.acos(min(1.0, max(-1.0, az_g / norm)))
     return math.degrees(angle_rad)
 
+
 def close_bus(bus):
     """Безопасно закрывает SMBus."""
     if bus is not None:
@@ -86,6 +127,7 @@ def close_bus(bus):
             bus.close()
         except Exception:
             pass
+
 
 # ========== MQTT ПОДКЛЮЧЕНИЕ ==========
 def connect_mqtt():
@@ -102,10 +144,12 @@ def connect_mqtt():
             time.sleep(3)
     return None
 
+
 def signal_handler(signum, frame):
     global shutdown_flag
     print(f"\n[MPU6050] Получен сигнал {signum}. Завершаем работу...", flush=True)
     shutdown_flag = True
+
 
 # ========== MAIN ==========
 if __name__ == "__main__":
@@ -118,6 +162,7 @@ if __name__ == "__main__":
 
     bus = None
     error_count = 0
+    first_init = True
     print("MPU6050 (калибруемый наклон). Ctrl+C для выхода.\n", flush=True)
 
     while not shutdown_flag:
@@ -131,16 +176,48 @@ if __name__ == "__main__":
                 continue
 
             if bus is None:
-                # Встряска шины перед инициализацией
-                i2c_bus_reset()
+                # Задержка перед первой инициализацией (чтобы шина успела стабилизироваться)
+                if first_init:
+                    print(f"MPU6050: Ожидание {INIT_DELAY} сек перед первой инициализацией...", flush=True)
+                    time.sleep(INIT_DELAY)
+                    first_init = False
                 
-                bus = SMBus(1)
-                if not init_sensor(bus):
-                    close_bus(bus)
-                    bus = None
+                # Многоуровневая инициализация с проверкой WHO_AM_I
+                initialized = False
+                for attempt in range(1, MAX_I2C_RETRIES + 1):
+                    # Встряска шины перед каждой попыткой
+                    i2c_bus_reset()
+                    
+                    # Проверяем WHO_AM_I через i2cget (более стабильно, чем smbus2)
+                    if check_who_am_i():
+                        # Датчик отвечает — пробуем через smbus2
+                        try:
+                            bus = SMBus(1)
+                            if init_sensor(bus):
+                                print(f"MPU6050: инициализирован (попытка {attempt})", flush=True)
+                                initialized = True
+                                break
+                            else:
+                                close_bus(bus)
+                                bus = None
+                        except Exception as e:
+                            close_bus(bus)
+                            bus = None
+                            print(f"MPU6050: smbus2 ошибка (попытка {attempt}): {e}", flush=True)
+                    else:
+                        print(f"MPU6050: WHO_AM_I не совпадает (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
+                    
+                    if attempt < MAX_I2C_RETRIES:
+                        delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))  # 2, 4, 8, 16, 2, 4, 8, 16...
+                        print(f"MPU6050: Повтор через {delay} сек...", flush=True)
+                        time.sleep(delay)
+                
+                if not initialized:
+                    print("MPU6050: Не удалось инициализировать после всех попыток", flush=True)
                     error_count += 1
-                    time.sleep(2)
+                    time.sleep(5)
                     continue
+                
                 error_count = 0
 
             ax, ay, az, gx, gy, gz, temp = read_sensor_data(bus)
