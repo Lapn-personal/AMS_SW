@@ -72,6 +72,18 @@ else
     echo -e "  ${GREEN}✓ Скорость I2C установлена на 10000 (10 кГц)${NC}"
 fi
 
+# Для новых ядер (brcmstb-i2c на Raspberry Pi 3/4/5) добавляем overlay,
+# т.к. dtparam=i2c_arm_baudrate не влияет на драйвер brcmstb-i2c
+I2C_OVERLAY="dtoverlay=i2c-bcm2708,baudrate=10000"
+if grep -q "^dtoverlay=i2c-bcm2708" "$CONFIG_FILE" 2>/dev/null; then
+    # Заменяем существующую строку (обновляем baudrate)
+    sed -i "s/^dtoverlay=i2c-bcm2708,baudrate=.*/$I2C_OVERLAY/" "$CONFIG_FILE"
+    echo -e "  ${GREEN}✓ Overlay i2c-bcm2708 обновлён (baudrate=10000)${NC}"
+else
+    echo "$I2C_OVERLAY" >> "$CONFIG_FILE"
+    echo -e "  ${GREEN}✓ Overlay i2c-bcm2708 добавлен (baudrate=10000)${NC}"
+fi
+
 
 # ========== 2. Добавление модулей i2c в /etc/modules ==========
 MODULES_FILE="/etc/modules"
