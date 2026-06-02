@@ -18,6 +18,7 @@ from i2c_helpers import (
     release_shared_i2c_bus,
     i2c_bus_reset,
     i2c_recover,
+    wake_device,
 )
 
 # ========== НАСТРОЙКИ ==========
@@ -30,7 +31,7 @@ MQTT_TOPIC = "sensors/distance"
 MAX_I2C_RETRIES = 10
 I2C_RETRY_DELAY = 2
 MAX_ERRORS_BEFORE_RESTART = 5
-INIT_DELAY = 5
+INIT_DELAY = 10  # ждём, пока ADS1115/INA219/MPU проинициализируются
 
 shutdown_flag = False
 
@@ -39,7 +40,9 @@ def init_sensor():
     """Инициализирует VL53L0X через adafruit_vl53l0x + shared bus."""
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # Без i2c_bus_reset() — i2cdetect сбивает соседние устройства (ADS1115)
+            # VL53L0X стартует последним. Если ADS1115 (0x48) завис — пробуждаем
+            if attempt == 1:
+                wake_device(0x48)
             time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)

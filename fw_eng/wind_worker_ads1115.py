@@ -19,6 +19,8 @@ from i2c_helpers import (
     release_shared_i2c_bus,
     i2c_bus_reset,
     i2c_recover,
+    ensure_i2c_ready,
+    wake_device,
 )
 
 # ========== НАСТРОЙКИ MQTT ==========
@@ -72,8 +74,14 @@ def init_sensor():
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # Без i2c_bus_reset() — i2cdetect сбивает VL53L0X
-            time.sleep(0.5)
+            # Пробуждаем ADS1115 точечным i2cget (не i2cdetect, чтобы не трогать VL53L0X)
+            if attempt == 1:
+                wake_device(ADS1115_ADDR)
+            time.sleep(0.3)
+
+            # Проверяем, что чип отвечает
+            if not ensure_i2c_ready(addr=ADS1115_ADDR, max_retries=2, delay=0.3):
+                raise IOError("ADS1115 не отвечает на шине")
 
             i2c_bus = get_shared_i2c_bus(max_retries=3, retry_delay=0.5)
             if i2c_bus is None:

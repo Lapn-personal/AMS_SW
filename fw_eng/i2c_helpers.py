@@ -230,6 +230,25 @@ def i2c_check_device(addr):
         return False
 
 
+def wake_device(addr):
+    """
+    "Пробуждает" устройство на указанном адресе — отправляет одиночный i2cget
+    без влияния на другие чипы на шине (в отличие от i2cdetect).
+    
+    addr: целочисленный адрес устройства (например, 0x48)
+    Возвращает True при успехе.
+    """
+    addr_str = f"0x{addr:02X}"
+    try:
+        subprocess.run(
+            I2CGET_CMD + [addr_str, "0x00"],
+            capture_output=True, text=True, timeout=2
+        )
+        return True
+    except Exception:
+        return False
+
+
 def ensure_i2c_ready(addr=None, max_retries=3, delay=1):
     """
     Проверяет, что I2C-шина готова к работе.
