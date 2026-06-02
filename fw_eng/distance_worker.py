@@ -2,9 +2,8 @@
 """
 distance_worker.py — измерение расстояния через VL53L0X / VL53L0K.
 
-Monkey-patch: перед импортом adafruit_vl53l0x заменяем проверку ID-регистров,
-чтобы библиотека приняла любой чип (включая клоны с нестандартными ID).
-Использует общую shared I2C-шину.
+Использует adafruit_vl53l0x + общую shared I2C-шину.
+Out-of-range (нет цели) не считается ошибкой датчика — без переинициализации.
 """
 
 import time
@@ -12,6 +11,7 @@ import json
 import sys
 import signal
 import paho.mqtt.client as mqtt
+import adafruit_vl53l0x
 
 from i2c_helpers import (
     get_shared_i2c_bus,
@@ -19,19 +19,6 @@ from i2c_helpers import (
     i2c_bus_reset,
     i2c_recover,
 )
-
-# ========== MONKEY-PATCH: отключаем проверку ID в adafruit_vl53l0x ==========
-# Библиотека проверяет регистры 0xC0==0xEE и 0xC1==0xAA.
-# Клоны (VL53L0K) имеют другие ID. Патчим _read_model_id перед импортом.
-import adafruit_vl53l0x
-
-_original_read_model_id = getattr(adafruit_vl53l0x.VL53L0X, '_read_model_id', None)
-if _original_read_model_id is not None:
-    def _patched_read_model_id(self):
-        print("[VL53L0X] Monkey-patch: пропускаем проверку ID (клон VL53L0K)", flush=True)
-    adafruit_vl53l0x.VL53L0X._read_model_id = _patched_read_model_id
-else:
-    print("[VL53L0X] Предупреждение: не удалось найти _read_model_id для патча", flush=True)
 
 # ========== НАСТРОЙКИ ==========
 MQTT_BROKER = "127.0.0.1"
@@ -49,7 +36,7 @@ shutdown_flag = False
 
 
 def init_sensor():
-    """Инициализирует VL53L0X/VL53L0K через adafruit_vl53l0x + shared bus."""
+    """Инициализирует VL53L0X через adafruit_vl53l0x + shared bus."""
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
             i2c_bus_reset()
@@ -97,7 +84,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    print("Distance worker (VL53L0X + monkey-patch for VL53L0K) запущен")
+    print("Distance worker (VL53L0X) запущен")
     client = connect_mqtt()
     if client is None:
         release_shared_i2c_bus()
@@ -130,14 +117,17 @@ if __name__ == "__main__":
                 error_count = 0
 
             range_mm = sensor.range
-            if range_mm is not None and range_mm > 0:
+            if range_mm is not None and range_mm > 0 and range_mm < 8190:
                 payload = {"distance_mm": range_mm}
                 client.publish(MQTT_TOPIC, json.dumps(payload), qos=0)
                 print(f"[РАССТОЯНИЕ] {range_mm} мм")
                 error_count = 0
             else:
-                print(f"[РАССТОЯНИЕ] Ошибка измерения: range={range_mm}")
-                error_count += 1
+                # Out-of-range (нет цели) — не ошибка датчика, не сбрасываем sensor
+                # Логируем раз в 30 циклов чтобы не спамить
+                if error_count % 30 == 0:
+                    print(f"[РАССТОЯНИЕ] Цель отсутствует (range={range_mm})", flush=True)
+                # НЕ увеличиваем error_count — штатная ситуация
 
             for _ in range(3):
                 if shutdown_flag:
