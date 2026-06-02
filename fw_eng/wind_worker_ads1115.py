@@ -17,9 +17,7 @@ from adafruit_ads1x15.analog_in import AnalogIn
 from i2c_helpers import (
     get_shared_i2c_bus,
     release_shared_i2c_bus,
-    i2c_bus_reset,
     i2c_recover,
-    ensure_i2c_ready,
     wake_device,
 )
 
@@ -74,14 +72,10 @@ def init_sensor():
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # Пробуждаем ADS1115 точечным i2cget (не i2cdetect, чтобы не трогать VL53L0X)
+            # Точечно будим ADS1115 (i2cget, не трогает другие чипы)
             if attempt == 1:
                 wake_device(ADS1115_ADDR)
             time.sleep(0.3)
-
-            # Проверяем, что чип отвечает
-            if not ensure_i2c_ready(addr=ADS1115_ADDR, max_retries=2, delay=0.3):
-                raise IOError("ADS1115 не отвечает на шине")
 
             i2c_bus = get_shared_i2c_bus(max_retries=3, retry_delay=0.5)
             if i2c_bus is None:
