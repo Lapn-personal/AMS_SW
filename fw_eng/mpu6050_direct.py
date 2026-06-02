@@ -158,8 +158,8 @@ def signal_handler(signum, frame):
 def try_create_sensor():
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            i2c_bus_reset()
-            time.sleep(0.4)
+            # Без i2c_bus_reset() — i2cdetect сбивает соседние устройства
+            time.sleep(0.5)
 
             if not check_who_am_i():
                 print(f"MPU6050: WHO_AM_I не совпадает (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)

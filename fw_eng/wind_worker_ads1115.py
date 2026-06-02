@@ -72,8 +72,8 @@ def init_sensor():
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            i2c_bus_reset()
-            time.sleep(0.4)
+            # Без i2c_bus_reset() — i2cdetect сбивает VL53L0X
+            time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=3, retry_delay=0.5)
             if i2c_bus is None:

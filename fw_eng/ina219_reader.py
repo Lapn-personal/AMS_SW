@@ -63,8 +63,8 @@ def init_ina():
     """Инициализирует INA219 на shared I2C bus."""
     for attempt in range(1, 11):
         try:
-            i2c_bus_reset()
-            time.sleep(0.4)
+            # Без i2c_bus_reset() — i2cdetect сбивает соседние устройства
+            time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)
             if i2c_bus is None:

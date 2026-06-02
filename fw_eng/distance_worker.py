@@ -30,7 +30,7 @@ MQTT_TOPIC = "sensors/distance"
 MAX_I2C_RETRIES = 10
 I2C_RETRY_DELAY = 2
 MAX_ERRORS_BEFORE_RESTART = 5
-INIT_DELAY = 3
+INIT_DELAY = 5
 
 shutdown_flag = False
 
@@ -39,8 +39,8 @@ def init_sensor():
     """Инициализирует VL53L0X через adafruit_vl53l0x + shared bus."""
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            i2c_bus_reset()
-            time.sleep(0.4)
+            # Без i2c_bus_reset() — i2cdetect сбивает соседние устройства (ADS1115)
+            time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)
             if i2c_bus is None:
