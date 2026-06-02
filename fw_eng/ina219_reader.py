@@ -2,9 +2,8 @@
 """
 ina219_reader.py — измерение напряжения с аналогового датчика ветра через INA219.
 
-Использует библиотеку ina219 для работы с датчиком.
-Добавлена проверка ID-регистра через i2cget перед инициализацией
-и многоуровневое восстановление шины при ошибках.
+Использует adafruit_ina219 + busio.I2C для работы с датчиком,
+с предварительной проверкой ID-регистра через i2cget.
 """
 
 import time
@@ -13,14 +12,17 @@ import sys
 import signal
 import subprocess
 import paho.mqtt.client as mqtt
-from ina219 import INA219
-from ina219 import DeviceRangeError
+import adafruit_ina219
 
 # Импортируем I2C-хелперы для стабильности шины
-from i2c_helpers import i2c_bus_reset, i2c_recover
+from i2c_helpers import (
+    create_i2c_bus,
+    i2c_bus_reset,
+    i2c_recover,
+    ensure_i2c_ready,
+)
 
 # ========== НАСТРОЙКИ ==========
-SHUNT_OHMS = 0.1  # не важно, можно оставить
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_USER = "ams_iot"
@@ -28,13 +30,12 @@ MQTT_PASS = "ams_iot_pass"
 MQTT_TOPIC_WIND = "sensors/wind"
 
 # Калибровка датчика ветра (подберите под свой)
-# Например: при напряжении 100 мВ -> 5 м/с, при 500 мВ -> 25 м/с (линейно)
 VOLTAGE_MAX_MV = 500.0      # максимальное измеренное напряжение (мВ)
 WIND_MAX_MPS = 25.0         # скорость ветра при максимальном напряжении
 
-# Watchdog: максимальное время между публикациями (сек)
+# Watchdog и повторы
 PUBLISH_INTERVAL = 1
-MAX_SKIP_BEFORE_RESTART = 5  # уменьшено — быстрее переходим к recovery
+MAX_SKIP_BEFORE_RESTART = 5
 INIT_DELAY = 3               # задержка перед первой инициализацией (сек)
 
 INA219_ADDR = 0x40  # стандартный адрес INA219
@@ -47,19 +48,15 @@ def check_ina219_id():
     """
     Проверяет ID-регистр INA219 через i2cget.
     Регистр 0x00 (Configuration) должен читаться без ошибок.
-    Регистр 0xFE (Manufacturer ID) должен быть 0x5449 ('TI').
     Возвращает True, если датчик отвечает корректно.
     """
     try:
-        # Читаем конфигурационный регистр (0x00)
         result = subprocess.run(
             ["i2cget", "-y", str(I2C_BUS), f"0x{INA219_ADDR:02X}", "0x00", "w"],
             capture_output=True, text=True, timeout=3
         )
         if result.returncode == 0:
             val = int(result.stdout.strip(), 16)
-            # INA219 при включении имеет конфиг 0x399F
-            # INA226 имеет другой конфиг, но любое успешное чтение — уже хорошо
             print(f"INA219: Конфиг регистр = 0x{val:04X}", flush=True)
             return True
         else:
@@ -94,12 +91,12 @@ def connect_mqtt():
 
 
 def init_ina():
-    """Инициализирует INA219 с повторными попытками и проверкой ID."""
+    """Инициализирует INA219 через adafruit_ina219 с повторными попытками и проверкой ID."""
     for attempt in range(1, 11):  # до 10 попыток
         try:
             # Встряска шины перед инициализацией
             i2c_bus_reset()
-            
+
             # Проверяем ID через i2cget
             if not check_ina219_id():
                 print(f"INA219: ID не совпадает (попытка {attempt}/10)", flush=True)
@@ -108,10 +105,13 @@ def init_ina():
                     print(f"INA219: Повтор через {delay} сек...")
                     time.sleep(delay)
                 continue
-            
-            ina = INA219(SHUNT_OHMS, busnum=1)
-            ina.configure(voltage_range=ina.RANGE_32V, gain=ina.GAIN_AUTO,
-                          bus_adc=ina.ADC_12BIT, shunt_adc=ina.ADC_12BIT)
+
+            # Создаём шину busio и инициализируем датчик
+            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
+            if i2c_bus is None:
+                raise IOError("Не удалось создать I2C-шину")
+
+            ina = adafruit_ina219.INA219(i2c_bus)
             print(f"INA219: датчик инициализирован (попытка {attempt})")
             return ina
         except Exception as e:
@@ -161,9 +161,10 @@ if __name__ == "__main__":
                     break
                 continue
             
-            # Читаем дифференциальное напряжение (Vin+ - Vin-)
-            voltage_v = ina.voltage()
-            voltage_mv = voltage_v * 1000
+            # Читаем напряжение шины (bus_voltage) и ток
+            bus_voltage_v = ina.bus_voltage  # напряжение на шине (V+)
+            # Также доступен shunt_voltage (напряжение на шунте)
+            voltage_mv = bus_voltage_v * 1000
 
             if voltage_mv < 0:
                 voltage_mv = 0
@@ -183,10 +184,6 @@ if __name__ == "__main__":
                     break
                 time.sleep(1)
 
-        except DeviceRangeError as e:
-            print(f"INA219: Ошибка диапазона: {e}")
-            error_count += 1
-            time.sleep(1)
         except (OSError, IOError) as e:
             print(f"INA219: Ошибка I2C: {e}. Переинициализация...")
             error_count += 1

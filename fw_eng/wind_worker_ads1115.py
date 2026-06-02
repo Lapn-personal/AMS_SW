@@ -2,8 +2,8 @@
 """
 wind_worker_ads1115.py — измерение скорости ветра через ADS1115.
 
-Использует i2cget/i2cset (i2c-tools) для максимальной стабильности,
-вместо adafruit_ads1x15 + busio.I2C, которые нестабильны на Debian 13.
+Использует adafruit_ads1x15 + busio.I2C для работы с датчиком,
+с предварительной диагностикой шины через i2c-tools.
 """
 
 import time
@@ -11,12 +11,13 @@ import json
 import sys
 import signal
 import paho.mqtt.client as mqtt
+import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
 
-# Импортируем I2C-хелперы
+# Импортируем I2C-хелперы для стабильности шины
 from i2c_helpers import (
+    create_i2c_bus,
     ensure_i2c_ready,
-    i2c_read_word,
-    i2c_write_block,
     i2c_bus_reset,
     i2c_recover,
 )
@@ -30,8 +31,6 @@ MQTT_TOPIC_WIND = "sensors/wind"
 
 # ========== АДРЕС ADS1115 ==========
 ADS1115_ADDR = 0x48
-REG_CONFIG = 0x01
-REG_CONVERSION = 0x00
 
 # ========== КАЛИБРОВКА ДАТЧИКА ВЕТРА (подберите свои значения) ==========
 VOLTAGE_AT_ZERO_WIND = 0.02    # Вольт при 0 м/с
@@ -42,14 +41,6 @@ MAX_WIND_SPEED = 30.0          # Максимальная скорость (м/�
 MAX_I2C_RETRIES = 5
 I2C_RETRY_DELAY = 3
 MAX_ERRORS_BEFORE_RESTART = 10
-
-# Конфигурация ADS1115:
-# - Continuous conversion (бит 15 = 0)
-# - A0-A1 differential (MUX = 000)
-# - ±4.096V (PGA = 001, gain=1)
-# - 128 SPS (DR = 100)
-# Байты для i2cset block: [0x83, 0x06] (старший, младший)
-ADS1115_CONFIG_BYTES = [0x83, 0x06]
 
 shutdown_flag = False
 
@@ -81,7 +72,7 @@ def connect_mqtt():
 # ========== ИНИЦИАЛИЗАЦИЯ ДАТЧИКА ==========
 def init_sensor():
     """
-    Инициализирует ADS1115 через i2cset/i2cget с повторными попытками.
+    Инициализирует ADS1115 через adafruit_ads1x15 с повторными попытками.
     Перед каждой попыткой делает "встряску" шины.
     """
     last_error = None
@@ -89,25 +80,23 @@ def init_sensor():
         try:
             # Встряска шины перед каждой попыткой
             i2c_bus_reset()
-            
-            # Проверяем, что устройство отвечает
-            config_val = i2c_read_word(ADS1115_ADDR, REG_CONFIG, max_retries=2, delay=0.3)
-            if config_val is None:
-                raise IOError("ADS1115 не отвечает на шине")
-            
-            # Настраиваем конфиг: continuous mode, A0-A1, ±4.096V, 128 SPS
-            if not i2c_write_block(ADS1115_ADDR, REG_CONFIG, ADS1115_CONFIG_BYTES, max_retries=2, delay=0.3):
-                raise IOError("Не удалось записать конфиг ADS1115")
-            
-            # Проверяем, что конфиг применился
-            time.sleep(0.1)
-            config_val = i2c_read_word(ADS1115_ADDR, REG_CONFIG, max_retries=2, delay=0.3)
-            if config_val is None:
-                raise IOError("ADS1115 перестал отвечать после записи конфига")
-            
-            print(f"ADS1115: инициализирован (попытка {attempt}), config=0x{config_val:04X}")
-            return True
-            
+
+            # Проверяем наличие устройства через i2c-tools
+            if not ensure_i2c_ready(addr=ADS1115_ADDR, max_retries=2, delay=0.5):
+                raise IOError("ADS1115 не обнаружен на шине")
+
+            # Создаём шину busio и инициализируем датчик
+            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
+            if i2c_bus is None:
+                raise IOError("Не удалось создать I2C-шину")
+
+            ads = ADS.ADS1115(i2c_bus, address=ADS1115_ADDR)
+            # Настраиваем канал A0 в single-ended режиме
+            channel = AnalogIn(ads, ADS.P0)
+
+            print(f"ADS1115: инициализирован (попытка {attempt})")
+            return ads, channel
+
         except Exception as e:
             last_error = e
             print(f"ADS1115: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}")
@@ -115,22 +104,21 @@ def init_sensor():
                 delay = I2C_RETRY_DELAY * (2 ** (attempt - 1))
                 print(f"ADS1115: Повтор через {delay} сек...")
                 time.sleep(delay)
-    
+
     print(f"ADS1115: Не удалось инициализировать после {MAX_I2C_RETRIES} попыток: {last_error}")
-    return False
+    return None, None
 
 
-def read_voltage():
+def read_voltage(channel):
     """
-    Читает напряжение с ADS1115.
+    Читает напряжение с ADS1115 через AnalogIn.
     Возвращает float (вольты) или None при ошибке.
     """
-    raw = i2c_read_word(ADS1115_ADDR, REG_CONVERSION, max_retries=3, delay=0.3)
-    if raw is None:
+    try:
+        return channel.voltage
+    except Exception as e:
+        print(f"ADS1115: Ошибка чтения напряжения: {e}")
         return None
-    # ±4.096V, 16-bit: 1 LSB = 4.096 / 32768 = 0.000125V
-    voltage = raw * 4.096 / 32768.0
-    return voltage
 
 
 def signal_handler(signum, frame):
@@ -149,7 +137,8 @@ if __name__ == "__main__":
     if client is None:
         sys.exit(1)
     
-    initialized = False
+    ads = None
+    channel = None
     error_count = 0
 
     while not shutdown_flag:
@@ -163,15 +152,15 @@ if __name__ == "__main__":
                 continue
 
             # Инициализация датчика, если ещё не
-            if not initialized:
-                initialized = init_sensor()
-                if not initialized:
+            if ads is None or channel is None:
+                ads, channel = init_sensor()
+                if ads is None:
                     print("ADS1115: Датчик недоступен, повтор через 10 сек...")
                     time.sleep(10)
                     continue
                 error_count = 0
 
-            voltage = read_voltage()
+            voltage = read_voltage(channel)
             if voltage is None:
                 raise IOError("Ошибка чтения ADS1115")
             
@@ -190,7 +179,8 @@ if __name__ == "__main__":
 
         except Exception as e:
             print(f"ADS1115: Ошибка чтения/инициализации: {e}")
-            initialized = False  # сбросим, чтобы пересоздать при следующем цикле
+            ads = None
+            channel = None
             error_count += 1
             time.sleep(3)
         
@@ -198,7 +188,8 @@ if __name__ == "__main__":
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"ADS1115: {error_count} ошибок подряд. Полная переинициализация I2C...")
             i2c_recover()
-            initialized = False
+            ads = None
+            channel = None
             error_count = 0
             time.sleep(5)
     

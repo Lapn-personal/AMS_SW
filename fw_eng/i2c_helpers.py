@@ -3,21 +3,22 @@
 i2c_helpers.py — общие утилиты для стабильной работы с I2C на Raspberry Pi.
 
 Содержит:
+- create_i2c_bus() — создание busio.I2C с повторными попытками и встряской шины
 - i2c_bus_reset() — "встряска" шины через i2cdetect
 - i2c_recover() — принудительный сброс залипших устройств
-- retry_i2c() — декоратор/обёртка с экспоненциальной задержкой
+- ensure_i2c_ready() — проверка готовности шины и устройства
 """
 
 import subprocess
 import time
 import os
-import sys
+import board
+import busio
 
 # ========== НАСТРОЙКИ ==========
-I2C_BUS = 1
-I2CDETECT_CMD = ["i2cdetect", "-y", str(I2C_BUS)]
-I2CGET_CMD = ["i2cget", "-y", str(I2C_BUS)]
-I2CSET_CMD = ["i2cset", "-y", str(I2C_BUS)]
+I2C_BUS_NUM = 1
+I2CDETECT_CMD = ["i2cdetect", "-y", str(I2C_BUS_NUM)]
+I2CGET_CMD = ["i2cget", "-y", str(I2C_BUS_NUM)]
 
 
 def i2c_bus_reset():
@@ -77,8 +78,7 @@ def i2c_recover():
         time.sleep(1)
     
     # Попытка 2: если есть i2c-gpio recovery через Device Tree
-    # Пробуем записать в sysfs, если доступно
-    recovery_path = f"/sys/bus/i2c/devices/i2c-{I2C_BUS}/recover"
+    recovery_path = f"/sys/bus/i2c/devices/i2c-{I2C_BUS_NUM}/recover"
     if os.path.exists(recovery_path):
         try:
             with open(recovery_path, 'w') as f:
@@ -110,139 +110,67 @@ def i2c_recover():
     return False
 
 
-def i2c_read_word(addr, reg, max_retries=3, delay=0.5):
+def i2c_check_device(addr):
     """
-    Читает 16-битное значение из регистра I2C-устройства через i2cget.
+    Проверяет наличие устройства на указанном I2C-адресе через i2cget.
     
-    addr: адрес устройства (hex, например 0x48)
-    reg: регистр (hex, например 0x00)
-    max_retries: макс. количество попыток
-    delay: задержка между попытками (сек)
-    
-    Возвращает int или None при ошибке.
+    addr: целочисленный адрес устройства (например, 0x48)
+    Возвращает True, если устройство отвечает.
     """
     addr_str = f"0x{addr:02X}"
-    reg_str = f"0x{reg:02X}"
+    try:
+        result = subprocess.run(
+            I2CGET_CMD + [addr_str, "0x00", "w"],
+            capture_output=True, text=True, timeout=3
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def create_i2c_bus(max_retries=5, retry_delay=1):
+    """
+    Создаёт шину busio.I2C с повторными попытками и предварительной
+    встряской/восстановлением шины через i2c-tools.
     
+    max_retries: максимальное количество попыток создания шины
+    retry_delay: задержка между попытками (сек)
+    
+    Возвращает объект busio.I2C или None при невозможности создать.
+    """
     for attempt in range(1, max_retries + 1):
         try:
-            result = subprocess.run(
-                I2CGET_CMD + [addr_str, reg_str, 'w'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                val = int(result.stdout.strip(), 16)
-                # i2cget возвращает little-endian для word, меняем байты
-                return ((val & 0xFF) << 8) | ((val >> 8) & 0xFF)
-            else:
-                if attempt < max_retries:
-                    time.sleep(delay)
-        except Exception as e:
+            # Встряска шины перед созданием
+            i2c_bus_reset()
+            time.sleep(0.2)
+            
+            bus = busio.I2C(board.SCL, board.SDA)
+            # Пробуем просканировать шину через созданный bus
+            bus.try_lock()
+            try:
+                devices = bus.scan()
+                if devices:
+                    print(f"[I2C] Шина создана успешно, найдены устройства: {[hex(d) for d in devices]}")
+                    return bus
+                print(f"[I2C] Шина создана, но устройства не обнаружены (попытка {attempt}/{max_retries})")
+            finally:
+                bus.unlock()
+            
+            # Если устройств нет — пробуем ещё раз
             if attempt < max_retries:
-                print(f"[I2C] Ошибка чтения {addr_str}[{reg_str}] (попытка {attempt}): {e}")
+                delay = retry_delay * (2 ** (attempt - 1))
+                print(f"[I2C] Повтор создания шины через {delay} сек...")
                 time.sleep(delay)
-    return None
-
-
-def i2c_write_word(addr, reg, value, max_retries=3, delay=0.5):
-    """
-    Записывает 16-битное значение в регистр I2C-устройства через i2cset.
-    
-    addr: адрес устройства (hex, например 0x48)
-    reg: регистр (hex, например 0x01)
-    value: значение для записи (int)
-    max_retries: макс. количество попыток
-    delay: задержка между попытками (сек)
-    
-    Возвращает True при успехе.
-    """
-    addr_str = f"0x{addr:02X}"
-    reg_str = f"0x{reg:02X}"
-    # Меняем байты местами для i2cset (little-endian)
-    swapped = ((value & 0xFF) << 8) | ((value >> 8) & 0xFF)
-    val_str = f"0x{swapped:04X}"
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            result = subprocess.run(
-                I2CSET_CMD + [addr_str, reg_str, val_str, 'w'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return True
-            else:
-                if attempt < max_retries:
-                    time.sleep(delay)
+                
         except Exception as e:
+            print(f"[I2C] Ошибка создания шины busio (попытка {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
-                print(f"[I2C] Ошибка записи {addr_str}[{reg_str}] (попытка {attempt}): {e}")
+                delay = retry_delay * (2 ** (attempt - 1))
+                print(f"[I2C] Повтор через {delay} сек...")
                 time.sleep(delay)
-    return False
-
-
-def i2c_write_block(addr, reg, data_bytes, max_retries=3, delay=0.5):
-    """
-    Записывает блок байт в I2C-устройство через i2cset с режимом i2c block.
+                i2c_recover()
     
-    addr: адрес устройства (hex, например 0x48)
-    reg: регистр (hex, например 0x01)
-    data_bytes: список байт для записи (например [0x83, 0x86])
-    max_retries: макс. количество попыток
-    delay: задержка между попытками (сек)
-    
-    Возвращает True при успехе.
-    """
-    addr_str = f"0x{addr:02X}"
-    reg_str = f"0x{reg:02X}"
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            cmd = I2CSET_CMD + [addr_str, reg_str] + [f"0x{b:02X}" for b in data_bytes] + ['i']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                return True
-            else:
-                if attempt < max_retries:
-                    time.sleep(delay)
-        except Exception as e:
-            if attempt < max_retries:
-                print(f"[I2C] Ошибка block-записи {addr_str}[{reg_str}] (попытка {attempt}): {e}")
-                time.sleep(delay)
-    return False
-
-
-def i2c_read_block(addr, reg, length, max_retries=3, delay=0.5):
-    """
-    Читает блок байт из I2C-устройства через i2cget с режимом i2c block.
-    
-    addr: адрес устройства (hex, например 0x68)
-    reg: регистр (hex, например 0x3B)
-    length: количество байт для чтения
-    max_retries: макс. количество попыток
-    delay: задержка между попытками (сек)
-    
-    Возвращает список байт или None при ошибке.
-    """
-    addr_str = f"0x{addr:02X}"
-    reg_str = f"0x{reg:02X}"
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            result = subprocess.run(
-                I2CGET_CMD + [addr_str, reg_str, 'i', str(length)],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                # Парсим вывод: "0x3B 0x00 0x00 0x00 ..."
-                parts = result.stdout.strip().split()
-                return [int(p, 16) for p in parts]
-            else:
-                if attempt < max_retries:
-                    time.sleep(delay)
-        except Exception as e:
-            if attempt < max_retries:
-                print(f"[I2C] Ошибка block-чтения {addr_str}[{reg_str}] (попытка {attempt}): {e}")
-                time.sleep(delay)
+    print("[I2C] Не удалось создать шину busio после всех попыток")
     return None
 
 
@@ -251,8 +179,8 @@ def ensure_i2c_ready(addr=None, max_retries=3, delay=1):
     Проверяет, что I2C-шина готова к работе.
     Если шина не отвечает — пытается восстановить.
     
-    addr: если указан, проверяет конкретное устройство
-    max_retries: макс. количество попыток восстановления
+    addr: если указан, проверяет конкретное устройство через i2cget
+    max_retries: максимальное количество попыток восстановления
     delay: задержка между попытками (сек)
     
     Возвращает True, если шина (и устройство) доступны.
@@ -267,8 +195,7 @@ def ensure_i2c_ready(addr=None, max_retries=3, delay=1):
         
         # Если указан конкретный адрес — проверяем его
         if addr is not None:
-            val = i2c_read_word(addr, 0x00, max_retries=1)
-            if val is not None:
+            if i2c_check_device(addr):
                 return True
             print(f"[I2C] Устройство 0x{addr:02X} не отвечает (попытка {attempt}/{max_retries})")
             i2c_recover()

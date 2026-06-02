@@ -2,9 +2,8 @@
 """
 distance_worker.py — измерение расстояния через VL53L0X.
 
-Использует adafruit_vl53l0x для работы с датчиком.
-Добавлена проверка ID-регистров через i2cget перед инициализацией
-и многоуровневое восстановление шины при ошибках.
+Использует adafruit_vl53l0x + busio.I2C для работы с датчиком,
+с предварительной проверкой ID-регистров через i2cget.
 """
 
 import time
@@ -12,13 +11,15 @@ import json
 import sys
 import signal
 import subprocess
-import board
-import busio
-import adafruit_vl53l0x
 import paho.mqtt.client as mqtt
+import adafruit_vl53l0x
 
 # Импортируем I2C-хелперы для стабильности шины
-from i2c_helpers import i2c_bus_reset, i2c_recover
+from i2c_helpers import (
+    create_i2c_bus,
+    i2c_bus_reset,
+    i2c_recover,
+)
 
 # ========== НАСТРОЙКИ MQTT ==========
 MQTT_BROKER = "127.0.0.1"
@@ -28,9 +29,9 @@ MQTT_PASS = "ams_iot_pass"
 MQTT_TOPIC = "sensors/distance"
 
 # ========== ЗАЩИТА ОТ ЗАВИСАНИЙ ==========
-MAX_I2C_RETRIES = 10          # увеличено с 5 до 10
-I2C_RETRY_DELAY = 2           # уменьшено для более частых попыток
-MAX_ERRORS_BEFORE_RESTART = 5 # уменьшено — быстрее переходим к recovery
+MAX_I2C_RETRIES = 10
+I2C_RETRY_DELAY = 2
+MAX_ERRORS_BEFORE_RESTART = 5
 INIT_DELAY = 3                # задержка перед первой инициализацией (сек)
 
 VL53L0X_ADDR = 0x29
@@ -106,8 +107,12 @@ def init_sensor():
                     time.sleep(delay)
                 continue
             
-            i2c = busio.I2C(board.SCL, board.SDA)
-            sensor = adafruit_vl53l0x.VL53L0X(i2c)
+            # Создаём шину busio через унифицированный хелпер
+            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
+            if i2c_bus is None:
+                raise IOError("Не удалось создать I2C-шину")
+
+            sensor = adafruit_vl53l0x.VL53L0X(i2c_bus)
             print(f"VL53L0X: инициализирован (попытка {attempt})")
             return sensor
         except Exception as e:
