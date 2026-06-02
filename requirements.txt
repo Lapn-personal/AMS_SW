@@ -1,4 +1,5 @@
 paho-mqtt>=1.6.1
 adafruit-blinka>=8.0.0
 adafruit-circuitpython-ads1x15>=2.2.22
+adafruit-circuitpython-vl53l0x>=2.1.14
 adafruit-circuitpython-ina219>=2.1.0
