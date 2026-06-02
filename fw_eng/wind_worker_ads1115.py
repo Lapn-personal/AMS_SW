@@ -91,8 +91,8 @@ def init_sensor():
                 raise IOError("Не удалось создать I2C-шину")
 
             ads = ADS.ADS1115(i2c_bus, address=ADS1115_ADDR)
-            # Настраиваем канал A0 в single-ended режиме
-            channel = AnalogIn(ads, ADS.P0)
+            # Настраиваем канал A0 в single-ended режиме (канал 0)
+            channel = AnalogIn(ads, 0)
 
             print(f"ADS1115: инициализирован (попытка {attempt})")
             return ads, channel

@@ -3,7 +3,7 @@
 distance_worker.py — измерение расстояния через VL53L0X.
 
 Использует adafruit_vl53l0x + busio.I2C для работы с датчиком,
-с предварительной проверкой ID-регистров через i2cget.
+с предварительной проверкой наличия чипа через busio.scan / i2cget.
 """
 
 import time
@@ -40,47 +40,37 @@ I2C_BUS = 1
 shutdown_flag = False
 
 
-def check_vl53l0x_id():
+def check_vl53l0x_present():
     """
-    Проверяет ID-регистры VL53L0X через i2cget/i2cset.
-    Сначала выводит датчик из software standby (запись 0x00 в регистр 0x00),
-    затем читает регистры 0xC0 (ожидается 0xEE) и 0xC1 (ожидается 0xAA).
-    Возвращает True, если значения совпадают.
+    Проверяет наличие VL53L0X на шине через i2cget.
+    ID-регистры (0xC0/0xC1) недоступны без полной загрузки прошивки чипа,
+    поэтому просто проверяем, что устройство отвечает на своём адресе.
+    Возвращает True, если устройство присутствует.
     """
     try:
+        import board
+        import busio
+        # Простое сканирование адреса через busio
+        i2c = busio.I2C(board.SCL, board.SDA)
+        i2c.try_lock()
+        try:
+            devices = i2c.scan()
+            return VL53L0X_ADDR in devices
+        finally:
+            i2c.unlock()
+            i2c.deinit()
+    except Exception:
+        pass
+    
+    # Fallback: i2cget
+    try:
         addr_str = f"0x{VL53L0X_ADDR:02X}"
-        
-        # Пробуждаем датчик: выход из software standby
-        # VL53L0X при старте имеет 0x01 в регистре 0x00, нужно записать 0x00
-        subprocess.run(
-            ["i2cset", "-y", str(I2C_BUS), addr_str, "0x00", "0x00"],
+        result = subprocess.run(
+            ["i2cget", "-y", str(I2C_BUS), addr_str, "0x00"],
             capture_output=True, text=True, timeout=3
         )
-        time.sleep(0.01)  # пауза после выхода из standby
-        
-        # Регистр 0xC0
-        result0 = subprocess.run(
-            ["i2cget", "-y", str(I2C_BUS), addr_str, "0xC0"],
-            capture_output=True, text=True, timeout=3
-        )
-        # Регистр 0xC1
-        result1 = subprocess.run(
-            ["i2cget", "-y", str(I2C_BUS), addr_str, "0xC1"],
-            capture_output=True, text=True, timeout=3
-        )
-        
-        if result0.returncode == 0 and result1.returncode == 0:
-            id0 = int(result0.stdout.strip(), 16)
-            id1 = int(result1.stdout.strip(), 16)
-            if id0 == 0xEE and id1 == 0xAA:
-                return True
-            else:
-                print(f"VL53L0X: ID-регистры: 0xC0=0x{id0:02X}, 0xC1=0x{id1:02X} (ожидалось 0xEE, 0xAA)", flush=True)
-                return False
-        else:
-            return False
-    except Exception as e:
-        print(f"VL53L0X: Ошибка проверки ID-регистров: {e}", flush=True)
+        return result.returncode == 0
+    except Exception:
         return False
 
 
@@ -109,9 +99,9 @@ def init_sensor():
             # Встряска шины перед каждой попыткой
             i2c_bus_reset()
             
-            # Проверяем ID-регистры через i2cget (более стабильно, чем busio)
-            if not check_vl53l0x_id():
-                print(f"VL53L0X: ID-регистры не совпадают (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
+            # Проверяем наличие чипа на шине
+            if not check_vl53l0x_present():
+                print(f"VL53L0X: чип не обнаружен (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
                 if attempt < MAX_I2C_RETRIES:
                     delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
                     print(f"VL53L0X: Повтор через {delay} сек...", flush=True)
