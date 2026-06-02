@@ -43,8 +43,8 @@ shutdown_flag = False
 
 def check_who_am_i():
     """
-    Проверяет WHO_AM_I регистр MPU6050 через i2cget.
-    Ожидаемое значение: 0x68.
+    Проверяет WHO_AM_I регистр MPU6050/MPU6500 через i2cget.
+    Ожидаемые значения: 0x68 (MPU6050) или 0x70 (MPU6500/ICM-20602).
     Возвращает True, если значение совпадает.
     """
     try:
@@ -54,10 +54,10 @@ def check_who_am_i():
         )
         if result.returncode == 0:
             val = int(result.stdout.strip(), 16)
-            if val == 0x68:
+            if val in (0x68, 0x70):  # MPU6050 или MPU6500
                 return True
             else:
-                print(f"MPU6050: WHO_AM_I = 0x{val:02X} (ожидалось 0x68)", flush=True)
+                print(f"MPU6050: WHO_AM_I = 0x{val:02X} (ожидалось 0x68 или 0x70)", flush=True)
                 return False
         else:
             return False
