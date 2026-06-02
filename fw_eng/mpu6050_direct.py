@@ -2,9 +2,8 @@
 """
 mpu6050_direct.py — измерение наклона через MPU6050/MPU6500/ICM-20602.
 
-Использует прямой доступ к регистрам через busio.I2C (без adafruit_mpu6050,
-которая жёстко проверяет WHO_AM_I == 0x68 и не работает с MPU6500).
-Проверка WHO_AM_I выполняется через i2cget (принимает 0x68 и 0x70).
+Использует прямой доступ к регистрам через ОБЩУЮ shared I2C-шину
+(busio.I2C), без adafruit_mpu6050 и без конфликтов шины.
 """
 
 import time
@@ -16,9 +15,9 @@ import signal
 import subprocess
 import paho.mqtt.client as mqtt
 
-# Импортируем I2C-хелперы для стабильности шины
 from i2c_helpers import (
-    create_i2c_bus,
+    get_shared_i2c_bus,
+    release_shared_i2c_bus,
     i2c_bus_reset,
     i2c_recover,
 )
@@ -31,21 +30,15 @@ MQTT_USER = "ams_iot"
 MQTT_PASS = "ams_iot_pass"
 MQTT_TOPIC_TILT = "sensors/tilt"
 
-# ========== ЗАЩИТА ОТ ЗАВИСАНИЙ ==========
 MAX_I2C_RETRIES = 10
 I2C_RETRY_DELAY = 2
 MAX_ERRORS_BEFORE_RESTART = 5
-INIT_DELAY = 3                # задержка перед первой инициализацией (сек)
+INIT_DELAY = 3
 
 shutdown_flag = False
 
 
 def check_who_am_i():
-    """
-    Проверяет WHO_AM_I регистр MPU6050/MPU6500 через i2cget.
-    Ожидаемые значения: 0x68 (MPU6050) или 0x70 (MPU6500/ICM-20602).
-    Возвращает True, если значение совпадает.
-    """
     try:
         result = subprocess.run(
             ["i2cget", "-y", "1", f"0x{ADDRESS:02X}", "0x75"],
@@ -53,22 +46,18 @@ def check_who_am_i():
         )
         if result.returncode == 0:
             val = int(result.stdout.strip(), 16)
-            if val in (0x68, 0x70):  # MPU6050 или MPU6500
+            if val in (0x68, 0x70):
                 return True
             else:
                 print(f"MPU6050: WHO_AM_I = 0x{val:02X} (ожидалось 0x68 или 0x70)", flush=True)
                 return False
-        else:
-            return False
+        return False
     except Exception as e:
-        print(f"MPU6050: Ошибка проверки WHO_AM_I: {e}", flush=True)
+        print(f"MPU6050: Ошибка WHO_AM_I: {e}", flush=True)
         return False
 
 
-# ========== ПРЯМОЙ ДОСТУП К РЕГИСТРАМ ЧЕРЕЗ BUSIO ==========
-
 def bus_read_byte(i2c_bus, reg):
-    """Читает один байт из регистра MPU через busio."""
     i2c_bus.try_lock()
     try:
         result = bytearray(1)
@@ -79,7 +68,6 @@ def bus_read_byte(i2c_bus, reg):
 
 
 def bus_write_byte(i2c_bus, reg, value):
-    """Записывает один байт в регистр MPU через busio."""
     i2c_bus.try_lock()
     try:
         i2c_bus.writeto(ADDRESS, bytes([reg, value]))
@@ -88,7 +76,6 @@ def bus_write_byte(i2c_bus, reg, value):
 
 
 def bus_read_word_signed(i2c_bus, reg):
-    """Читает 16-битное знаковое значение из пары регистров (big-endian)."""
     i2c_bus.try_lock()
     try:
         result = bytearray(2)
@@ -102,18 +89,16 @@ def bus_read_word_signed(i2c_bus, reg):
 
 
 def init_sensor(i2c_bus):
-    """Инициализирует MPU: выход из sleep, сброс."""
     try:
         bus_write_byte(i2c_bus, 0x6B, 0x00)
         time.sleep(0.1)
         return True
     except Exception as e:
-        print(f"Ошибка инициализации MPU: {e}", flush=True)
+        print(f"MPU: Ошибка инициализации: {e}", flush=True)
         return False
 
 
 def read_sensor_data(i2c_bus):
-    """Читает все данные с MPU: акселерометр, гироскоп, температура."""
     ax = bus_read_word_signed(i2c_bus, 0x3B) / 16384.0 * 9.81
     ay = bus_read_word_signed(i2c_bus, 0x3D) / 16384.0 * 9.81
     az = bus_read_word_signed(i2c_bus, 0x3F) / 16384.0 * 9.81
@@ -126,7 +111,6 @@ def read_sensor_data(i2c_bus):
 
 
 def load_tilt_offset():
-    """Загружает смещение из файла ~/fw_settings/tilt_calib.json, возвращает float (по умолчанию 0)."""
     settings_dir = os.path.expanduser("~/fw_settings")
     calib_file = os.path.join(settings_dir, "tilt_calib.json")
     if not os.path.exists(calib_file):
@@ -150,7 +134,6 @@ def compute_tilt(ax, ay, az):
     return math.degrees(angle_rad)
 
 
-# ========== MQTT ПОДКЛЮЧЕНИЕ ==========
 def connect_mqtt():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.username_pw_set(MQTT_USER, MQTT_PASS)
@@ -168,31 +151,16 @@ def connect_mqtt():
 
 def signal_handler(signum, frame):
     global shutdown_flag
-    print(f"\n[MPU6050] Получен сигнал {signum}. Завершаем работу...", flush=True)
+    print(f"\n[MPU6050] Сигнал {signum}. Завершение...", flush=True)
     shutdown_flag = True
 
 
-def safe_close_bus(i2c_bus):
-    """Безопасно освобождает шину I2C."""
-    if i2c_bus is not None:
-        try:
-            i2c_bus.deinit()
-        except Exception:
-            pass
-
-
-# ========== ИНИЦИАЛИЗАЦИЯ С ПОВТОРАМИ ==========
 def try_create_sensor():
-    """
-    Пытается создать шину busio и инициализировать MPU с повторными попытками.
-    Возвращает (i2c_bus, True) при успехе или (None, False).
-    """
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # Встряска шины
             i2c_bus_reset()
+            time.sleep(0.4)
 
-            # Проверяем WHO_AM_I через i2cget (стабильнее, чем busio)
             if not check_who_am_i():
                 print(f"MPU6050: WHO_AM_I не совпадает (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
                 if attempt < MAX_I2C_RETRIES:
@@ -201,36 +169,33 @@ def try_create_sensor():
                     time.sleep(delay)
                 continue
 
-            # Создаём шину busio
-            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
+            i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)
             if i2c_bus is None:
-                raise IOError("Не удалось создать I2C-шину")
+                raise IOError("Shared I2C bus недоступен")
 
             if init_sensor(i2c_bus):
                 print(f"MPU6050: инициализирован (попытка {attempt})", flush=True)
                 return i2c_bus
-            else:
-                safe_close_bus(i2c_bus)
 
         except Exception as e:
-            print(f"MPU6050: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}", flush=True)
+            print(f"MPU6050: Ошибка (попытка {attempt}/{MAX_I2C_RETRIES}): {e}", flush=True)
 
         if attempt < MAX_I2C_RETRIES:
             delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
             print(f"MPU6050: Повтор через {delay} сек...", flush=True)
             time.sleep(delay)
 
-    print("MPU6050: Не удалось инициализировать после всех попыток", flush=True)
+    print("MPU6050: Не удалось инициализировать", flush=True)
     return None
 
 
-# ========== MAIN ==========
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
     client = connect_mqtt()
     if client is None:
+        release_shared_i2c_bus()
         sys.exit(1)
 
     i2c_bus = None
@@ -240,21 +205,18 @@ if __name__ == "__main__":
 
     while not shutdown_flag:
         try:
-            # Проверка MQTT
             if not client.is_connected():
-                print("MPU6050: MQTT разорван, переподключаемся...", flush=True)
+                print("MPU6050: MQTT разорван...", flush=True)
                 client = connect_mqtt()
                 if client is None:
                     break
                 continue
 
             if i2c_bus is None:
-                # Задержка перед первой инициализацией
                 if first_init:
-                    print(f"MPU6050: Ожидание {INIT_DELAY} сек перед первой инициализацией...", flush=True)
+                    print(f"MPU6050: Ожидание {INIT_DELAY} сек...", flush=True)
                     time.sleep(INIT_DELAY)
                     first_init = False
-
                 i2c_bus = try_create_sensor()
                 if i2c_bus is None:
                     print("MPU6050: Датчик недоступен, повтор через 10 сек...", flush=True)
@@ -264,32 +226,26 @@ if __name__ == "__main__":
 
             ax, ay, az, gx, gy, gz, temp = read_sensor_data(i2c_bus)
             tilt_raw = compute_tilt(ax, ay, az)
-
-            # Загружаем смещение и применяем его
             offset = load_tilt_offset()
             tilt_calibrated = tilt_raw - offset
 
-            # Публикуем скорректированный угол
             payload = json.dumps({"tilt_degrees": round(tilt_calibrated, 2)})
             client.publish(MQTT_TOPIC_TILT, payload, qos=0)
 
-            # Отладочный вывод
             print(f"Accel: X={ax:.2f}, Y={ay:.2f}, Z={az:.2f} m/s²")
             print(f"Gyro:  X={gx:.2f}, Y={gy:.2f}, Z={gz:.2f} °/s")
-            print(f"Temp:  {temp:.2f} °C   |   Наклон: {tilt_calibrated:.2f}° (сырой: {tilt_raw:.2f}°, смещение: {offset:.2f}°)")
+            print(f"Temp:  {temp:.2f} °C | Наклон: {tilt_calibrated:.2f}° (сырой: {tilt_raw:.2f}°, смещение: {offset:.2f}°)")
             print("-" * 70, flush=True)
 
             error_count = 0
 
-            # Ожидание с проверкой shutdown_flag
             for _ in range(DELAY):
                 if shutdown_flag:
                     break
                 time.sleep(1)
 
         except (OSError, IOError) as e:
-            print(f"Ошибка I2C: {e}. Переподключение...", flush=True)
-            safe_close_bus(i2c_bus)
+            print(f"MPU6050: Ошибка I2C: {e}", flush=True)
             i2c_bus = None
             error_count += 1
             time.sleep(2)
@@ -297,18 +253,16 @@ if __name__ == "__main__":
             print("\nЗавершено.")
             break
         except Exception as e:
-            print(f"Неизвестная ошибка: {e}", flush=True)
+            print(f"MPU6050: Неизвестная ошибка: {e}", flush=True)
             error_count += 1
             time.sleep(1)
 
-        # Если слишком много ошибок подряд — полный перезапуск I2C
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
-            print(f"MPU6050: {error_count} ошибок подряд. Полная переинициализация I2C...", flush=True)
+            print(f"MPU6050: {error_count} ошибок подряд. Переинициализация...", flush=True)
             i2c_recover()
-            safe_close_bus(i2c_bus)
             i2c_bus = None
             error_count = 0
             time.sleep(5)
 
-    safe_close_bus(i2c_bus)
+    release_shared_i2c_bus()
     print("[MPU6050] Завершён.", flush=True)
