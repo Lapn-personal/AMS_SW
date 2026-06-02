@@ -1,9 +1,10 @@
 #!/usr/bin/env python3 -u
 """
-mpu6050_direct.py — измерение наклона через MPU6050.
+mpu6050_direct.py — измерение наклона через MPU6050/MPU6500/ICM-20602.
 
-Использует adafruit_mpu6050 + busio.I2C для работы с датчиком,
-с предварительной проверкой WHO_AM_I через i2cget.
+Использует прямой доступ к регистрам через busio.I2C (без adafruit_mpu6050,
+которая жёстко проверяет WHO_AM_I == 0x68 и не работает с MPU6500).
+Проверка WHO_AM_I выполняется через i2cget (принимает 0x68 и 0x70).
 """
 
 import time
@@ -14,14 +15,12 @@ import sys
 import signal
 import subprocess
 import paho.mqtt.client as mqtt
-import adafruit_mpu6050
 
 # Импортируем I2C-хелперы для стабильности шины
 from i2c_helpers import (
     create_i2c_bus,
     i2c_bus_reset,
     i2c_recover,
-    ensure_i2c_ready,
 )
 
 ADDRESS = 0x68
@@ -66,6 +65,66 @@ def check_who_am_i():
         return False
 
 
+# ========== ПРЯМОЙ ДОСТУП К РЕГИСТРАМ ЧЕРЕЗ BUSIO ==========
+
+def bus_read_byte(i2c_bus, reg):
+    """Читает один байт из регистра MPU через busio."""
+    i2c_bus.try_lock()
+    try:
+        result = bytearray(1)
+        i2c_bus.writeto_then_readfrom(ADDRESS, bytes([reg]), result)
+        return result[0]
+    finally:
+        i2c_bus.unlock()
+
+
+def bus_write_byte(i2c_bus, reg, value):
+    """Записывает один байт в регистр MPU через busio."""
+    i2c_bus.try_lock()
+    try:
+        i2c_bus.writeto(ADDRESS, bytes([reg, value]))
+    finally:
+        i2c_bus.unlock()
+
+
+def bus_read_word_signed(i2c_bus, reg):
+    """Читает 16-битное знаковое значение из пары регистров (big-endian)."""
+    i2c_bus.try_lock()
+    try:
+        result = bytearray(2)
+        i2c_bus.writeto_then_readfrom(ADDRESS, bytes([reg]), result)
+        val = (result[0] << 8) | result[1]
+        if val > 32767:
+            val -= 65536
+        return val
+    finally:
+        i2c_bus.unlock()
+
+
+def init_sensor(i2c_bus):
+    """Инициализирует MPU: выход из sleep, сброс."""
+    try:
+        bus_write_byte(i2c_bus, 0x6B, 0x00)
+        time.sleep(0.1)
+        return True
+    except Exception as e:
+        print(f"Ошибка инициализации MPU: {e}", flush=True)
+        return False
+
+
+def read_sensor_data(i2c_bus):
+    """Читает все данные с MPU: акселерометр, гироскоп, температура."""
+    ax = bus_read_word_signed(i2c_bus, 0x3B) / 16384.0 * 9.81
+    ay = bus_read_word_signed(i2c_bus, 0x3D) / 16384.0 * 9.81
+    az = bus_read_word_signed(i2c_bus, 0x3F) / 16384.0 * 9.81
+    gx = bus_read_word_signed(i2c_bus, 0x43) / 131.0
+    gy = bus_read_word_signed(i2c_bus, 0x45) / 131.0
+    gz = bus_read_word_signed(i2c_bus, 0x47) / 131.0
+    temp_raw = bus_read_word_signed(i2c_bus, 0x41)
+    temp = temp_raw / 340.0 + 36.53
+    return (ax, ay, az, gx, gy, gz, temp)
+
+
 def load_tilt_offset():
     """Загружает смещение из файла ~/fw_settings/tilt_calib.json, возвращает float (по умолчанию 0)."""
     settings_dir = os.path.expanduser("~/fw_settings")
@@ -78,45 +137,6 @@ def load_tilt_offset():
             return data.get("offset", 0.0)
     except Exception:
         return 0.0
-
-
-def init_sensor():
-    """
-    Инициализирует MPU6050 через adafruit_mpu6050 с повторными попытками.
-    Предварительно проверяет WHO_AM_I через i2cget.
-    """
-    for attempt in range(1, MAX_I2C_RETRIES + 1):
-        try:
-            # Встряска шины перед каждой попыткой
-            i2c_bus_reset()
-
-            # Проверяем WHO_AM_I через i2cget (более стабильно, чем через busio)
-            if not check_who_am_i():
-                print(f"MPU6050: WHO_AM_I не совпадает (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
-                if attempt < MAX_I2C_RETRIES:
-                    delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
-                    print(f"MPU6050: Повтор через {delay} сек...", flush=True)
-                    time.sleep(delay)
-                continue
-
-            # Создаём шину busio и инициализируем датчик
-            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
-            if i2c_bus is None:
-                raise IOError("Не удалось создать I2C-шину")
-
-            sensor = adafruit_mpu6050.MPU6050(i2c_bus)
-            print(f"MPU6050: инициализирован (попытка {attempt})", flush=True)
-            return sensor
-
-        except Exception as e:
-            print(f"MPU6050: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}", flush=True)
-            if attempt < MAX_I2C_RETRIES:
-                delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
-                print(f"MPU6050: Повтор через {delay} сек...", flush=True)
-                time.sleep(delay)
-
-    print("MPU6050: Не удалось инициализировать после всех попыток", flush=True)
-    return None
 
 
 def compute_tilt(ax, ay, az):
@@ -152,13 +172,56 @@ def signal_handler(signum, frame):
     shutdown_flag = True
 
 
-def safe_close_sensor(sensor):
-    """Безопасно освобождает шину датчика."""
-    if sensor is not None:
+def safe_close_bus(i2c_bus):
+    """Безопасно освобождает шину I2C."""
+    if i2c_bus is not None:
         try:
-            sensor.i2c_device.i2c.deinit()
+            i2c_bus.deinit()
         except Exception:
             pass
+
+
+# ========== ИНИЦИАЛИЗАЦИЯ С ПОВТОРАМИ ==========
+def try_create_sensor():
+    """
+    Пытается создать шину busio и инициализировать MPU с повторными попытками.
+    Возвращает (i2c_bus, True) при успехе или (None, False).
+    """
+    for attempt in range(1, MAX_I2C_RETRIES + 1):
+        try:
+            # Встряска шины
+            i2c_bus_reset()
+
+            # Проверяем WHO_AM_I через i2cget (стабильнее, чем busio)
+            if not check_who_am_i():
+                print(f"MPU6050: WHO_AM_I не совпадает (попытка {attempt}/{MAX_I2C_RETRIES})", flush=True)
+                if attempt < MAX_I2C_RETRIES:
+                    delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
+                    print(f"MPU6050: Повтор через {delay} сек...", flush=True)
+                    time.sleep(delay)
+                continue
+
+            # Создаём шину busio
+            i2c_bus = create_i2c_bus(max_retries=2, retry_delay=0.5)
+            if i2c_bus is None:
+                raise IOError("Не удалось создать I2C-шину")
+
+            if init_sensor(i2c_bus):
+                print(f"MPU6050: инициализирован (попытка {attempt})", flush=True)
+                return i2c_bus
+            else:
+                safe_close_bus(i2c_bus)
+
+        except Exception as e:
+            print(f"MPU6050: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}", flush=True)
+
+        if attempt < MAX_I2C_RETRIES:
+            delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
+            print(f"MPU6050: Повтор через {delay} сек...", flush=True)
+            time.sleep(delay)
+
+    print("MPU6050: Не удалось инициализировать после всех попыток", flush=True)
+    return None
 
 
 # ========== MAIN ==========
@@ -170,10 +233,10 @@ if __name__ == "__main__":
     if client is None:
         sys.exit(1)
 
-    sensor = None
+    i2c_bus = None
     error_count = 0
     first_init = True
-    print("MPU6050 (калибруемый наклон). Ctrl+C для выхода.\n", flush=True)
+    print("MPU6050/MPU6500 (калибруемый наклон). Ctrl+C для выхода.\n", flush=True)
 
     while not shutdown_flag:
         try:
@@ -185,26 +248,22 @@ if __name__ == "__main__":
                     break
                 continue
 
-            if sensor is None:
+            if i2c_bus is None:
                 # Задержка перед первой инициализацией
                 if first_init:
                     print(f"MPU6050: Ожидание {INIT_DELAY} сек перед первой инициализацией...", flush=True)
                     time.sleep(INIT_DELAY)
                     first_init = False
 
-                sensor = init_sensor()
-                if sensor is None:
+                i2c_bus = try_create_sensor()
+                if i2c_bus is None:
                     print("MPU6050: Датчик недоступен, повтор через 10 сек...", flush=True)
                     time.sleep(10)
                     continue
                 error_count = 0
 
-            # Читаем данные через adafruit_mpu6050
-            acc_x, acc_y, acc_z = sensor.acceleration
-            gx, gy, gz = sensor.gyro
-            temp = sensor.temperature
-
-            tilt_raw = compute_tilt(acc_x, acc_y, acc_z)
+            ax, ay, az, gx, gy, gz, temp = read_sensor_data(i2c_bus)
+            tilt_raw = compute_tilt(ax, ay, az)
 
             # Загружаем смещение и применяем его
             offset = load_tilt_offset()
@@ -215,7 +274,7 @@ if __name__ == "__main__":
             client.publish(MQTT_TOPIC_TILT, payload, qos=0)
 
             # Отладочный вывод
-            print(f"Accel: X={acc_x:.2f}, Y={acc_y:.2f}, Z={acc_z:.2f} m/s²")
+            print(f"Accel: X={ax:.2f}, Y={ay:.2f}, Z={az:.2f} m/s²")
             print(f"Gyro:  X={gx:.2f}, Y={gy:.2f}, Z={gz:.2f} °/s")
             print(f"Temp:  {temp:.2f} °C   |   Наклон: {tilt_calibrated:.2f}° (сырой: {tilt_raw:.2f}°, смещение: {offset:.2f}°)")
             print("-" * 70, flush=True)
@@ -230,8 +289,8 @@ if __name__ == "__main__":
 
         except (OSError, IOError) as e:
             print(f"Ошибка I2C: {e}. Переподключение...", flush=True)
-            safe_close_sensor(sensor)
-            sensor = None
+            safe_close_bus(i2c_bus)
+            i2c_bus = None
             error_count += 1
             time.sleep(2)
         except KeyboardInterrupt:
@@ -241,15 +300,15 @@ if __name__ == "__main__":
             print(f"Неизвестная ошибка: {e}", flush=True)
             error_count += 1
             time.sleep(1)
-        
+
         # Если слишком много ошибок подряд — полный перезапуск I2C
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"MPU6050: {error_count} ошибок подряд. Полная переинициализация I2C...", flush=True)
             i2c_recover()
-            safe_close_sensor(sensor)
-            sensor = None
+            safe_close_bus(i2c_bus)
+            i2c_bus = None
             error_count = 0
             time.sleep(5)
-    
-    safe_close_sensor(sensor)
+
+    safe_close_bus(i2c_bus)
     print("[MPU6050] Завершён.", flush=True)

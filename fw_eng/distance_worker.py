@@ -42,19 +42,30 @@ shutdown_flag = False
 
 def check_vl53l0x_id():
     """
-    Проверяет ID-регистры VL53L0X через i2cget.
-    Регистр 0xC0 должен быть 0xEE, регистр 0xC1 должен быть 0xAA.
+    Проверяет ID-регистры VL53L0X через i2cget/i2cset.
+    Сначала выводит датчик из software standby (запись 0x00 в регистр 0x00),
+    затем читает регистры 0xC0 (ожидается 0xEE) и 0xC1 (ожидается 0xAA).
     Возвращает True, если значения совпадают.
     """
     try:
+        addr_str = f"0x{VL53L0X_ADDR:02X}"
+        
+        # Пробуждаем датчик: выход из software standby
+        # VL53L0X при старте имеет 0x01 в регистре 0x00, нужно записать 0x00
+        subprocess.run(
+            ["i2cset", "-y", str(I2C_BUS), addr_str, "0x00", "0x00"],
+            capture_output=True, text=True, timeout=3
+        )
+        time.sleep(0.01)  # пауза после выхода из standby
+        
         # Регистр 0xC0
         result0 = subprocess.run(
-            ["i2cget", "-y", str(I2C_BUS), f"0x{VL53L0X_ADDR:02X}", "0xC0"],
+            ["i2cget", "-y", str(I2C_BUS), addr_str, "0xC0"],
             capture_output=True, text=True, timeout=3
         )
         # Регистр 0xC1
         result1 = subprocess.run(
-            ["i2cget", "-y", str(I2C_BUS), f"0x{VL53L0X_ADDR:02X}", "0xC1"],
+            ["i2cget", "-y", str(I2C_BUS), addr_str, "0xC1"],
             capture_output=True, text=True, timeout=3
         )
         

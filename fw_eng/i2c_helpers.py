@@ -113,6 +113,8 @@ def i2c_recover():
 def i2c_check_device(addr):
     """
     Проверяет наличие устройства на указанном I2C-адресе через i2cget.
+    Использует однобайтовое чтение регистра 0x00 (без флага 'w') —
+    это более надёжно для простой проверки наличия чипа на шине.
     
     addr: целочисленный адрес устройства (например, 0x48)
     Возвращает True, если устройство отвечает.
@@ -120,7 +122,7 @@ def i2c_check_device(addr):
     addr_str = f"0x{addr:02X}"
     try:
         result = subprocess.run(
-            I2CGET_CMD + [addr_str, "0x00", "w"],
+            I2CGET_CMD + [addr_str, "0x00"],
             capture_output=True, text=True, timeout=3
         )
         return result.returncode == 0
