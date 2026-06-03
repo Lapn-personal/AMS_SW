@@ -23,10 +23,10 @@ ADS1115_ADDR = 0x48
 REG_CONVERSION = 0x00
 REG_CONFIG = 0x01
 
-# Конфиг: continuous, A0-A1 differential, ±4.096V, 128 SPS
-# Биты: 15=0(cont), 14-12=000(A0-A1 diff), 11-9=001(PGA ±4.096V), 8=0(cont),
+# Конфиг: continuous, A0 single-ended, ±4.096V, 128 SPS
+# Биты: 15=0(continuous), 14-12=100(A0 single-ended), 11-9=001(PGA ±4.096V), 8=0(cont),
 #       7-5=100(128 SPS), 4=0(traditional), 3=0(disable comparator), 2-0=011(disable queue)
-ADS1115_CONFIG = 0x8383  # [0x83, 0x83] в big-endian
+ADS1115_CONFIG = 0x4383  # [0x43, 0x83] в big-endian
 
 # Калибровка
 VOLTAGE_AT_ZERO_WIND = 0.02
