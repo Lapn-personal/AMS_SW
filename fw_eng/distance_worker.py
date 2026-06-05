@@ -49,6 +49,7 @@ def init_sensor():
             return sensor
         except Exception as e:
             print(f"VL53L0X: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}")
+            release_shared_i2c_bus()
             if attempt < MAX_I2C_RETRIES:
                 delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
                 print(f"VL53L0X: Повтор через {delay} сек...")
@@ -136,6 +137,7 @@ if __name__ == "__main__":
             print(f"VL53L0X: Ошибка I2C: {e}", flush=True)
             sensor = None
             error_count += 1
+            release_shared_i2c_bus()
             time.sleep(2)
         except KeyboardInterrupt:
             print("\nЗавершено.")

@@ -75,6 +75,7 @@ def init_ina():
             return ina
         except Exception as e:
             print(f"INA219: Ошибка инициализации (попытка {attempt}/10): {e}")
+            release_shared_i2c_bus()
             if attempt < 10:
                 delay = 2 * (2 ** ((attempt - 1) % 4))
                 print(f"INA219: Повтор через {delay} сек...")
@@ -139,6 +140,7 @@ if __name__ == "__main__":
         except (OSError, IOError) as e:
             print(f"INA219: Ошибка I2C: {e}")
             error_count += 1
+            release_shared_i2c_bus()
             try:
                 ina = init_ina()
             except:

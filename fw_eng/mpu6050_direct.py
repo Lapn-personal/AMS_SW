@@ -179,6 +179,7 @@ def try_create_sensor():
 
         except Exception as e:
             print(f"MPU6050: Ошибка (попытка {attempt}/{MAX_I2C_RETRIES}): {e}", flush=True)
+            release_shared_i2c_bus()
 
         if attempt < MAX_I2C_RETRIES:
             delay = I2C_RETRY_DELAY * (2 ** ((attempt - 1) % 4))
@@ -248,6 +249,7 @@ if __name__ == "__main__":
             print(f"MPU6050: Ошибка I2C: {e}", flush=True)
             i2c_bus = None
             error_count += 1
+            release_shared_i2c_bus()
             time.sleep(2)
         except KeyboardInterrupt:
             print("\nЗавершено.")
