@@ -96,10 +96,8 @@ def init_sensor():
     last_error = None
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # При первой попытке — полный сброс шины для пробуждения чипа
-            if attempt == 1:
-                i2c_recover()
-            time.sleep(0.5)
+            # Без агрессивных сбросов — просто пауза для стабилизации шины
+            time.sleep(1)
 
             i2c_bus = get_shared_i2c_bus(max_retries=3, retry_delay=0.5)
             if i2c_bus is None:
@@ -119,6 +117,8 @@ def init_sensor():
         except Exception as e:
             last_error = e
             print(f"ADS1115: Ошибка инициализации (попытка {attempt}/{MAX_I2C_RETRIES}): {e}")
+            # Утечка refcount: get_shared_i2c_bus был вызван, нужно освободить
+            release_shared_i2c_bus()
             if attempt < MAX_I2C_RETRIES:
                 delay = I2C_RETRY_DELAY * (2 ** (attempt - 1))
                 print(f"ADS1115: Повтор через {delay} сек...")
@@ -189,6 +189,7 @@ if __name__ == "__main__":
 
         except (OSError, IOError) as e:
             print(f"ADS1115: Ошибка I2C: {e}")
+            release_shared_i2c_bus()
             i2c_recover()
             i2c_bus = None
             error_count += 1
