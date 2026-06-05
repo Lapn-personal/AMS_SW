@@ -259,6 +259,7 @@ if __name__ == "__main__":
 
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"MPU6050: {error_count} ошибок подряд. Переинициализация...", flush=True)
+            release_shared_i2c_bus()
             i2c_recover()
             i2c_bus = None
             error_count = 0

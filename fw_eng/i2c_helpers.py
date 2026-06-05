@@ -56,9 +56,8 @@ def get_shared_i2c_bus(max_retries=5, retry_delay=1):
     bus = None
     for attempt in range(1, max_retries + 1):
         try:
-            # Встряска шины перед созданием
-            i2c_bus_reset()
-            time.sleep(0.4)  # увеличенная пауза перед созданием
+            # Простая пауза — i2cdetect сбивает все чипы
+            time.sleep(0.5)
 
             bus = busio.I2C(board.SCL, board.SDA)
             bus.try_lock()

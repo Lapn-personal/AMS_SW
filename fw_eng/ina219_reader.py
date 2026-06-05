@@ -151,6 +151,7 @@ if __name__ == "__main__":
 
         if error_count >= MAX_SKIP_BEFORE_RESTART:
             print(f"INA219: {error_count} ошибок подряд. Переинициализация...")
+            release_shared_i2c_bus()
             i2c_recover()
             try:
                 ina = init_ina()

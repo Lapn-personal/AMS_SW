@@ -16,9 +16,7 @@ import adafruit_vl53l0x
 from i2c_helpers import (
     get_shared_i2c_bus,
     release_shared_i2c_bus,
-    i2c_bus_reset,
     i2c_recover,
-    wake_device,
 )
 
 # ========== НАСТРОЙКИ ==========
@@ -40,9 +38,6 @@ def init_sensor():
     """Инициализирует VL53L0X через adafruit_vl53l0x + shared bus."""
     for attempt in range(1, MAX_I2C_RETRIES + 1):
         try:
-            # VL53L0X стартует последним. Если ADS1115 (0x48) завис — пробуждаем
-            if attempt == 1:
-                wake_device(0x48)
             time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)
@@ -152,6 +147,7 @@ if __name__ == "__main__":
 
         if error_count >= MAX_ERRORS_BEFORE_RESTART:
             print(f"VL53L0X: {error_count} ошибок подряд. Переинициализация...", flush=True)
+            release_shared_i2c_bus()
             i2c_recover()
             sensor = None
             error_count = 0
