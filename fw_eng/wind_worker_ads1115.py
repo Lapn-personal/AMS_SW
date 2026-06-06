@@ -24,9 +24,9 @@ REG_CONVERSION = 0x00
 REG_CONFIG = 0x01
 
 # Конфиг: continuous, A0-A1 differential, ±4.096V, 128 SPS
-# Биты: 15=0(continuous), 14-12=000(A0-A1 diff), 11-9=001(PGA ±4.096V), 8=0(cont),
+# Биты: 15=0(no effect), 14-12=000(A0-A1 diff), 11-9=001(PGA ±4.096V), 8=0(continuous),
 #       7-5=100(128 SPS), 4=0(traditional), 3-0=0011(disable comparator)
-ADS1115_CONFIG = 0x0383  # [0x03, 0x83] в big-endian
+ADS1115_CONFIG = 0x0283  # [0x02, 0x83] в big-endian
 
 # Калибровка
 VOLTAGE_AT_ZERO_WIND = 0.02
