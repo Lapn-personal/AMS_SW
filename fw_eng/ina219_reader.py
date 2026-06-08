@@ -1,8 +1,14 @@
 #!/usr/bin/env python3 -u
 """
-ina219_reader.py — измерение напряжения с аналогового датчика ветра через INA219.
+ina219_reader.py — мониторинг DC-питания системы через INA219.
 
-Использует adafruit_ina219 + общую shared I2C-шину.
+Измеряет напряжение на шине и ток через шунт, определяет режим питания:
+  - charging:   идёт заряд резервной АКБ (внешнее питание присутствует)
+  - discharging: система питается от резервной АКБ
+  - external:   внешнее питание, АКБ не заряжается/не разряжается
+  - battery:    низкое напряжение — вероятно, только от АКБ
+
+Публикует в sensors/system_power.
 """
 
 import time
@@ -15,7 +21,6 @@ import adafruit_ina219
 from i2c_helpers import (
     get_shared_i2c_bus,
     release_shared_i2c_bus,
-    i2c_bus_reset,
     i2c_recover,
 )
 
@@ -24,24 +29,33 @@ MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
 MQTT_USER = "ams_iot"
 MQTT_PASS = "ams_iot_pass"
-MQTT_TOPIC_WIND = "sensors/wind"
+MQTT_TOPIC = "sensors/system_power"
 
-VOLTAGE_MAX_MV = 500.0
-WIND_MAX_MPS = 25.0
+# Пороги для определения режима питания (мА)
+CURRENT_CHARGING_THRESHOLD_MA = 50.0     # ток > +50мА -> заряд
+CURRENT_DISCHARGING_THRESHOLD_MA = -50.0  # ток < -50мА -> разряд
+VOLTAGE_LOW_THRESHOLD_V = 4.5            # напряжение < 4.5В -> только АКБ
 
-PUBLISH_INTERVAL = 1
+PUBLISH_INTERVAL = 3   # публикация каждые ~3 сек (3 итерации сна по 1 сек)
 MAX_SKIP_BEFORE_RESTART = 5
 INIT_DELAY = 3
 
 shutdown_flag = False
 
 
-def mv_to_wind_speed(mv):
-    if mv <= 0:
-        return 0.0
-    if mv >= VOLTAGE_MAX_MV:
-        return WIND_MAX_MPS
-    return (mv / VOLTAGE_MAX_MV) * WIND_MAX_MPS
+def determine_power_mode(current_ma, bus_voltage_v):
+    """
+    Определяет режим питания по току и напряжению.
+    Возвращает одну из строк: "charging", "discharging", "external", "battery".
+    """
+    if current_ma > CURRENT_CHARGING_THRESHOLD_MA:
+        return "charging"
+    elif current_ma < CURRENT_DISCHARGING_THRESHOLD_MA:
+        return "discharging"
+    elif bus_voltage_v < VOLTAGE_LOW_THRESHOLD_V:
+        return "battery"
+    else:
+        return "external"
 
 
 def connect_mqtt():
@@ -63,7 +77,6 @@ def init_ina():
     """Инициализирует INA219 на shared I2C bus."""
     for attempt in range(1, 11):
         try:
-            # Без i2c_bus_reset() — i2cdetect сбивает соседние устройства
             time.sleep(0.5)
 
             i2c_bus = get_shared_i2c_bus(max_retries=2, retry_delay=0.5)
@@ -71,6 +84,8 @@ def init_ina():
                 raise IOError("Shared I2C bus недоступен")
 
             ina = adafruit_ina219.INA219(i2c_bus)
+            # Устанавливаем 16V/400mA range для типового шунта 0.1 Ом
+            # (по умолчанию adafruit_ina219 настраивает на ±3.2A с шунтом 0.1 Ом)
             print(f"INA219: инициализирован (попытка {attempt})")
             return ina
         except Exception as e:
@@ -94,7 +109,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    print("Wind worker (INA219): напряжение с аналогового датчика ветра")
+    print("Power monitor (INA219): DC-питание системы")
 
     client = connect_mqtt()
     if client is None:
@@ -120,15 +135,27 @@ if __name__ == "__main__":
                     break
                 continue
 
+            # Читаем напряжение на шине (после шунта, т.е. напряжение нагрузки)
             bus_voltage_v = ina.bus_voltage
-            voltage_mv = bus_voltage_v * 1000
-            if voltage_mv < 0:
-                voltage_mv = 0
+            if bus_voltage_v < 0:
+                bus_voltage_v = 0.0
 
-            wind_speed = mv_to_wind_speed(voltage_mv)
-            payload = {"wind_speed_mps": round(wind_speed, 1)}
-            client.publish(MQTT_TOPIC_WIND, json.dumps(payload), qos=0)
-            print(f"[ВЕТЕР INA219] {voltage_mv:.0f} мВ -> {wind_speed:.1f} м/с")
+            # Читаем ток через шунт (положительный — заряд/потребление от шины,
+            # отрицательный — разряд/отдача в шину)
+            current_ma = ina.current  # adafruit_ina219 возвращает мА
+
+            power_mode = determine_power_mode(current_ma, bus_voltage_v)
+
+            payload = {
+                "bus_voltage_v": round(bus_voltage_v, 3),
+                "current_ma": round(current_ma, 1),
+                "power_mode": power_mode,
+            }
+            client.publish(MQTT_TOPIC, json.dumps(payload), qos=0)
+            print(
+                f"[ПИТАНИЕ INA219] {bus_voltage_v:.3f} В, "
+                f"{current_ma:+.1f} мА -> {power_mode}"
+            )
 
             error_count = 0
 

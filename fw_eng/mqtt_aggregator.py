@@ -47,6 +47,7 @@ WATCHDOG_TIMEOUT = {
     "tilt": 30,           # раз в 3 сек
     "power": 120,         # раз в 30 сек (эмуляция)
     "battery": 120,       # раз в 30 сек (эмуляция)
+    "system_power": 30,   # раз в ~3 сек от INA219
 }
 WATCHDOG_CHECK_INTERVAL = 60  # проверка раз в минуту
 
@@ -67,7 +68,8 @@ latest_data = {
     "power_phases": {"L1": None, "L2": None, "L3": None},
     "battery": {"battery_state": None},
     "wind": {"wind_speed_mps": None},
-    "tilt": {"tilt_degrees": None}
+    "tilt": {"tilt_degrees": None},
+    "system_power": {"bus_voltage_v": None, "current_ma": None, "power_mode": None},
 }
 
 # Watchdog: время последнего обновления каждого типа данных
@@ -78,6 +80,7 @@ last_data_time = {
     "tilt": 0,
     "power": 0,
     "battery": 0,
+    "system_power": 0,
 }
 
 prev_power_state = {
@@ -319,6 +322,20 @@ def on_local_message(client, userdata, msg):
                 remote = safe_remote_client()
                 if DEVICE_ID is not None and remote is not None:
                     check_alerts(remote)
+        elif topic == "sensors/system_power":
+            bus_v = payload.get("bus_voltage_v")
+            cur_ma = payload.get("current_ma")
+            mode = payload.get("power_mode")
+            if bus_v is not None:
+                latest_data["system_power"]["bus_voltage_v"] = bus_v
+            if cur_ma is not None:
+                latest_data["system_power"]["current_ma"] = cur_ma
+            if mode is not None:
+                latest_data["system_power"]["power_mode"] = mode
+            last_data_time["system_power"] = time.time()
+            remote = safe_remote_client()
+            if DEVICE_ID is not None and remote is not None:
+                check_alerts(remote)
     except Exception as e:
         print(f"Ошибка локального обработчика {topic}: {e}")
 
@@ -447,18 +464,20 @@ def send_aggregated():
         "power_phases": latest_data["power_phases"].copy(),
         "battery": latest_data["battery"].copy(),
         "wind": latest_data["wind"].copy(),
-        "tilt": latest_data["tilt"].copy()
+        "tilt": latest_data["tilt"].copy(),
+        "system_power": latest_data["system_power"].copy(),
     }
     if latest_data["distance"] is not None:
         payload["distance_mm"] = latest_data["distance"]
     if not payload["temperatures"]:
         del payload["temperatures"]
-    for key in ["power_phases", "battery", "wind", "tilt"]:
+    for key in ["power_phases", "battery", "wind", "tilt", "system_power"]:
         if not payload[key] or all(v is None for v in payload[key].values()):
             del payload[key]
     payload_json = json.dumps(payload)
     if publish_with_retry(remote, TOPIC_REMOTE_TELEMETRY, payload_json):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Отправлено: {len(payload.get('temperatures', {}))} темп, dist={payload.get('distance_mm')}, ветер={payload.get('wind', {}).get('wind_speed_mps')}, наклон={payload.get('tilt', {}).get('tilt_degrees')}")
+        sp = payload.get("system_power", {})
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Отправлено: {len(payload.get('temperatures', {}))} темп, dist={payload.get('distance_mm')}, ветер={payload.get('wind', {}).get('wind_speed_mps')}, наклон={payload.get('tilt', {}).get('tilt_degrees')}, питание={sp.get('power_mode')} ({sp.get('bus_voltage_v')}В/{sp.get('current_ma')}мА)")
 
 def remote_loop():
     while not shutdown_flag:

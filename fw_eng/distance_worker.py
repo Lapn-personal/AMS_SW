@@ -4,12 +4,14 @@ distance_worker.py — измерение расстояния через VL53L0
 
 Использует adafruit_vl53l0x + общую shared I2C-шину.
 Out-of-range (нет цели) не считается ошибкой датчика — без переинициализации.
+Добавлен таймаут чтения range для защиты от аппаратного зависания датчика.
 """
 
 import time
 import json
 import sys
 import signal
+import threading
 import paho.mqtt.client as mqtt
 import adafruit_vl53l0x
 
@@ -30,8 +32,37 @@ MAX_I2C_RETRIES = 10
 I2C_RETRY_DELAY = 2
 MAX_ERRORS_BEFORE_RESTART = 5
 INIT_DELAY = 10  # ждём, пока ADS1115/INA219/MPU проинициализируются
+RANGE_READ_TIMEOUT = 3.0  # таймаут на чтение range (сек) — защита от зависания
 
 shutdown_flag = False
+
+
+def read_range_with_timeout(sensor, timeout=RANGE_READ_TIMEOUT):
+    """
+    Читает sensor.range в отдельном потоке с таймаутом.
+    Возвращает (range_mm, ok), где ok=False при таймауте/ошибке.
+    """
+    result = [None]
+    error = [None]
+
+    def _read():
+        try:
+            result[0] = sensor.range
+        except Exception as e:
+            error[0] = e
+
+    thread = threading.Thread(target=_read, daemon=True)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        # Поток не завершился — датчик завис
+        return None, False
+
+    if error[0] is not None:
+        raise error[0]
+
+    return result[0], True
 
 
 def init_sensor():
@@ -115,7 +146,15 @@ if __name__ == "__main__":
                     continue
                 error_count = 0
 
-            range_mm = sensor.range
+            range_mm, ok = read_range_with_timeout(sensor)
+            if not ok:
+                # Таймаут — датчик завис, сбрасываем для переинициализации
+                print("VL53L0X: Таймаут чтения range — датчик завис, переинициализация...", flush=True)
+                sensor = None
+                release_shared_i2c_bus()
+                time.sleep(2)
+                continue
+
             if range_mm is not None and range_mm > 0 and range_mm < 8190:
                 payload = {"distance_mm": range_mm}
                 client.publish(MQTT_TOPIC, json.dumps(payload), qos=0)
