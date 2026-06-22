@@ -1,0 +1,14 @@
+[Unit]
+Description=AMS Auto Update Timer — ежедневно в 3:00 по местному времени
+Requires=auto-update.service
+
+[Timer]
+# Ежедневно в 3:00 по локальному времени устройства
+OnCalendar=*-*-* 03:00:00
+# Добавляем случайную задержку до 60 сек, чтобы не перегружать GitHub
+RandomizedDelaySec=60
+# Не пропускать срабатывания, если устройство было выключено
+Persistent=true
+
+[Install]
+WantedBy=timers.target

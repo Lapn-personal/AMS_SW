@@ -1,6 +1,7 @@
 [Unit]
 Description=AMS Sensors Dashboard
-After=network.target
+After=network.target local-fs.target mosquitto.service
+Wants=mosquitto.service
 
 [Service]
 Type=simple
@@ -9,6 +10,7 @@ WorkingDirectory=/home/ams-root/AMS_SW
 ExecStart=/home/ams-root/AMS_SW/init.sh --daemon
 Restart=always
 RestartSec=10
+StartLimitBurst=0
 
 # Включаем запись логов в journald для отладки
 # После отладки можно вернуть null

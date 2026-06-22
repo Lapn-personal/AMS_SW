@@ -27,6 +27,14 @@ fi
 echo "[INIT] AMS_SW v$PROJECT_VERSION"
 echo "[INIT] Проект: $PROJECT_DIR"
 
+# Синхронизация часового пояса с реальным местоположением
+if [ -f "$PROJECT_DIR/services/sync_timezone.sh" ]; then
+    echo "[INIT] Синхронизация часового пояса..."
+    bash "$PROJECT_DIR/services/sync_timezone.sh" 2>&1 || echo "[INIT] Предупреждение: sync_timezone.sh завершился с ошибкой"
+else
+    echo "[INIT] Сценарий sync_timezone.sh не найден, пропускаем синхронизацию часового пояса"
+fi
+
 # 0. Проверка и установка правильной версии Python
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=9
@@ -147,24 +155,24 @@ else
     echo "[INIT] Mosquitto не установлен, пропускаем настройку"
 fi
 
-# 2. Автоматическая установка systemd-сервиса, если ещё не установлен
+# 2. Автоматическая установка и включение systemd-сервиса
 SERVICE_NAME="ams-sensors.service"
 SERVICE_DST="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_SRC="$PROJECT_DIR/services/$SERVICE_NAME"
 
-if [ ! -f "$SERVICE_DST" ] && [ -f "$SERVICE_SRC" ]; then
-    echo "[INIT] Сервис $SERVICE_NAME не установлен. Устанавливаю..."
-    if [ "$EUID" -eq 0 ]; then
+if [ "$EUID" -eq 0 ]; then
+    if [ -f "$SERVICE_SRC" ]; then
+        # Копируем unit-файл (всегда актуальную версию)
         cp "$SERVICE_SRC" "$SERVICE_DST"
         systemctl daemon-reload
-        systemctl enable "$SERVICE_NAME"
-        systemctl start "$SERVICE_NAME"
-        echo "[INIT] Сервис $SERVICE_NAME установлен и запущен"
+        # Всегда включаем автозапуск (идемпотентно)
+        systemctl enable "$SERVICE_NAME" 2>&1 || true
+        echo "[INIT] Сервис $SERVICE_NAME установлен и включён для автозапуска"
     else
-        echo "[INIT] Нет прав root. Установите вручную: sudo bash $PROJECT_DIR/services/install.sh"
+        echo "[INIT] Файл $SERVICE_SRC не найден, пропускаем установку сервиса"
     fi
 else
-    echo "[INIT] Сервис $SERVICE_NAME уже установлен"
+    echo "[INIT] Нет прав root. Установите вручную: sudo bash $PROJECT_DIR/services/install.sh"
 fi
 
 # 3. Создаём виртуальное окружение, если его нет
@@ -228,8 +236,21 @@ elif [ -c /dev/i2c-20 ] || [ -c /dev/i2c-21 ]; then
 else
     echo "[INIT] I2C не обнаружен!"
     echo "[INIT] Возможно, требуется перезагрузка для применения настроек из /boot/config.txt"
-    echo "[INIT] Запуск воркеров отложен. После перезагрузки init.sh запустится автоматически."
-    exit 0
+    echo "[INIT] Ожидание инициализации I2C (до 60 сек)..."
+    I2C_WAIT_COUNT=0
+    I2C_MAX_WAIT=12
+    while [ $I2C_WAIT_COUNT -lt $I2C_MAX_WAIT ]; do
+        sleep 5
+        I2C_WAIT_COUNT=$((I2C_WAIT_COUNT + 1))
+        if [ -c /dev/i2c-1 ] || [ -c /dev/i2c-20 ] || [ -c /dev/i2c-21 ]; then
+            echo "[INIT] I2C появился после $((I2C_WAIT_COUNT * 5)) сек ожидания"
+            break
+        fi
+        echo "[INIT] Ожидание I2C... (попытка $I2C_WAIT_COUNT/$I2C_MAX_WAIT)"
+    done
+    if [ $I2C_WAIT_COUNT -ge $I2C_MAX_WAIT ]; then
+        echo "[INIT] I2C так и не обнаружен после 60 сек. Пробуем запустить воркеры — возможно, они используют альтернативные шины."
+    fi
 fi
 
 # 10. Запускаем основную программу от ams-root

@@ -1,0 +1,12 @@
+[Unit]
+Description=AMS Auto Update from Git
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/ams-root/AMS_SW
+ExecStart=/home/ams-root/AMS_SW/services/auto_update.sh
+StandardOutput=journal
+StandardError=journal
