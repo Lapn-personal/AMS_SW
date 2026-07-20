@@ -22,7 +22,7 @@ LOCAL_PORT = 1883
 LOCAL_USER = "ams_iot"
 LOCAL_PASS = "ams_iot_pass"
 
-REMOTE_BROKER = "81.26.179.30"
+REMOTE_BROKER = "rosttele.com"
 REMOTE_PORT = 1883
 REMOTE_USER = "ams"
 REMOTE_PASS = "ams_32Kek"
